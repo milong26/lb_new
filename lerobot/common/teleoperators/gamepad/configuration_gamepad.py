@@ -19,10 +19,7 @@ from dataclasses import dataclass
 from ..config import TeleoperatorConfig
 
 
-@TeleoperatorConfig.register_subclass("so101_leader")
+@TeleoperatorConfig.register_subclass("gamepad")
 @dataclass
-class SO101LeaderConfig(TeleoperatorConfig):
-    # Port to connect to the arm
-    port: str
-
-    use_degrees: bool = False
+class GamepadTeleopConfig(TeleoperatorConfig):
+    use_gripper: bool = True

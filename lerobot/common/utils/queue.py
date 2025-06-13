@@ -14,15 +14,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from dataclasses import dataclass
+from queue import Empty
+from typing import Any
 
-from ..config import TeleoperatorConfig
+from torch.multiprocessing import Queue
 
 
-@TeleoperatorConfig.register_subclass("so101_leader")
-@dataclass
-class SO101LeaderConfig(TeleoperatorConfig):
-    # Port to connect to the arm
-    port: str
+def get_last_item_from_queue(queue: Queue, block=True, timeout: float = 0.1) -> Any:
+    if block:
+        try:
+            item = queue.get(timeout=timeout)
+        except Empty:
+            return None
+    else:
+        item = None
 
-    use_degrees: bool = False
+    # Drain queue and keep only the most recent parameters
+    try:
+        while True:
+            item = queue.get_nowait()
+    except Empty:
+        pass
+
+    return item
