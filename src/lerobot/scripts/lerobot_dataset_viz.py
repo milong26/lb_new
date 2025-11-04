@@ -165,6 +165,15 @@ def visualize_dataset(
             if OBS_STATE in batch:
                 for dim_idx, val in enumerate(batch[OBS_STATE][i]):
                     rr.log(f"state/{dim_idx}", rr.Scalars(val.item()))
+            # 增加两个输出
+            if "action_ee" in batch:
+                for dim_idx, val in enumerate(batch["action_ee"][i]):
+                    rr.log(f"action_ee/{dim_idx}", rr.Scalars(val.item()))
+
+            # observation.state_ee
+            if "observation.state_ee" in batch:
+                for dim_idx, val in enumerate(batch["observation.state_ee"][i]):
+                    rr.log(f"state_ee/{dim_idx}", rr.Scalars(val.item()))
 
             if DONE in batch:
                 rr.log(DONE, rr.Scalars(batch[DONE][i].item()))
