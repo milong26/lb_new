@@ -41,19 +41,36 @@ from lerobot.utils.control_utils import init_keyboard_listener
 from lerobot.utils.utils import log_say
 from lerobot.utils.visualization_utils import init_rerun
 
-NUM_EPISODES = 2
+NUM_EPISODES = 1
 FPS = 30
-EPISODE_TIME_SEC = 60
-RESET_TIME_SEC = 30
-TASK_DESCRIPTION = "My task description"
-HF_REPO_ID = "<hf_username>/<dataset_repo_id>"
+EPISODE_TIME_SEC = 20
+RESET_TIME_SEC = 2
+TASK_DESCRIPTION = "pick up the pyramid-shaped sachet and place it into the box."
+HF_REPO_ID = "test/ee"
 
-# Create the robot and teleoperator configurations
-camera_config = {"front": OpenCVCameraConfig(index_or_path=0, width=640, height=480, fps=FPS)}
+# 摄像头配置
+camera_config = {
+    "wrist": OpenCVCameraConfig(index_or_path=0, width=640, height=480, fps=FPS)
+    # 如果以后要加 side 摄像头可以在这里添加
+    # "side": IntelRealsenseConfig(serial_number_or_name="806312060427", width=640, height=480, fps=FPS, use_depth=True)
+}
+
+# 机器人配置
 follower_config = SO100FollowerConfig(
-    port="/dev/tty.usbmodem5A460814411", id="my_awesome_follower_arm", cameras=camera_config, use_degrees=True
+    port="/dev/ttyACM0",  # 对应 YAML 的 follower port
+    id="congbi",           # YAML 中 follower id
+    cameras=camera_config,
+    use_degrees=True
 )
-leader_config = SO100LeaderConfig(port="/dev/tty.usbmodem5A460819811", id="my_awesome_leader_arm")
+
+# 遥操作臂配置
+leader_config = SO100LeaderConfig(
+    port="/dev/ttyACM1",  # 对应 YAML 的 teleop port
+    id="zhubi"             # YAML 中 teleop id
+)
+
+# 个性化显示
+display_data = False
 
 # Initialize the robot and teleoperator
 follower = SO100Follower(follower_config)
@@ -61,14 +78,14 @@ leader = SO100Leader(leader_config)
 
 # NOTE: It is highly recommended to use the urdf in the SO-ARM100 repo: https://github.com/TheRobotStudio/SO-ARM100/blob/main/Simulation/SO101/so101_new_calib.urdf
 follower_kinematics_solver = RobotKinematics(
-    urdf_path="./SO101/so101_new_calib.urdf",
+    urdf_path="SO-ARM100/Simulation/SO101/so101_new_calib.urdf",
     target_frame_name="gripper_frame_link",
     joint_names=list(follower.bus.motors.keys()),
 )
 
 # NOTE: It is highly recommended to use the urdf in the SO-ARM100 repo: https://github.com/TheRobotStudio/SO-ARM100/blob/main/Simulation/SO101/so101_new_calib.urdf
 leader_kinematics_solver = RobotKinematics(
-    urdf_path="./SO101/so101_new_calib.urdf",
+    urdf_path="SO-ARM100/Simulation/SO101/so101_new_calib.urdf",
     target_frame_name="gripper_frame_link",
     joint_names=list(leader.bus.motors.keys()),
 )
@@ -77,11 +94,13 @@ leader_kinematics_solver = RobotKinematics(
 follower_joints_to_ee = RobotProcessorPipeline[RobotObservation, RobotObservation](
     steps=[
         ForwardKinematicsJointsToEE(
-            kinematics=follower_kinematics_solver, motor_names=list(follower.bus.motors.keys())
+            kinematics=follower_kinematics_solver, 
+            # 得到motor的名字
+            motor_names=list(follower.bus.motors.keys())
         ),
     ],
-    to_transition=observation_to_transition,
-    to_output=transition_to_observation,
+    to_transition=observation_to_transition, # 把输入（RobotObservation）转换为 pipeline 内部使用的统一格式
+    to_output=transition_to_observation, # pipeline 内部处理后的统一格式转换回输出格式
 )
 
 # Build pipeline to convert leader joints to EE action
@@ -111,6 +130,24 @@ ee_to_follower_joints = RobotProcessorPipeline[tuple[RobotAction, RobotObservati
     to_transition=robot_action_observation_to_transition,
     to_output=transition_to_robot_action,
 )
+
+
+features=combine_feature_dicts(
+    # Run the feature contract of the pipelines
+    # This tells you how the features would look like after the pipeline steps
+    aggregate_pipeline_dataset_features(
+        pipeline=leader_joints_to_ee,
+        initial_features=create_initial_features(action=leader.action_features),
+        use_videos=True,
+    ),
+    aggregate_pipeline_dataset_features(
+        pipeline=follower_joints_to_ee,
+        initial_features=create_initial_features(observation=follower.observation_features),
+        use_videos=True,
+    ),
+)
+
+
 
 # Create the dataset
 dataset = LeRobotDataset.create(
@@ -201,4 +238,4 @@ follower.disconnect()
 listener.stop()
 
 dataset.finalize()
-dataset.push_to_hub()
+# dataset.push_to_hub()
