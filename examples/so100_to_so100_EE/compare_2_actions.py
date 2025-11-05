@@ -12,12 +12,13 @@ from lerobot.processor.converters import (
 from lerobot.robots.so100_follower.config_so100_follower import SO100FollowerConfig
 from lerobot.robots.so100_follower.robot_kinematic_processor import InverseKinematicsEEToJoints
 from lerobot.robots.so100_follower.so100_follower import SO100Follower
+from lerobot.utils.robot_utils import busy_wait
 
 ACTION_EE = "action_ee"
 ACTION_JOINT = "action"
 
 EPISODE_IDX = 0
-HF_REPO_ID = "test/joint_ee"
+HF_REPO_ID = "complex/joint_ee"
 
 # Initialize the robot config (只是用来获取关节名字，不一定需要连接)
 robot_config = SO100FollowerConfig(
@@ -26,7 +27,7 @@ robot_config = SO100FollowerConfig(
     use_degrees=True
 )
 robot = SO100Follower(robot_config)
-robot.connect()
+
 
 # Kinematics solver
 kinematics_solver = RobotKinematics(
@@ -53,21 +54,26 @@ episode_frames = dataset.hf_dataset.filter(lambda x: x["episode_index"] == EPISO
 # Extract EE and joint actions
 ee_actions = episode_frames.select_columns(ACTION_EE)
 joint_actions = episode_frames.select_columns(ACTION_JOINT)
-
+robot.connect()
+if not robot.is_connected:
+    raise ValueError("Robot is not connected!")
 # Store processed joint actions from EE
 reconstructed_joints = []
 
 for idx in range(len(episode_frames)):
+    t0 = time.perf_counter()
     # EE action
     ee_action = {name: float(ee_actions[idx][ACTION_EE][i]) 
                  for i, name in enumerate(dataset.features[ACTION_EE]["names"])}
     
-    # Robot observation placeholder (这里不真正连接机器人，可用初始零位或dataset里的joint)
     robot_obs = robot.get_observation()
     
     # EE -> joint
     joint_action = robot_ee_to_joints_processor((ee_action, robot_obs))
+    _ = robot.send_action(joint_action)
     reconstructed_joints.append([joint_action[name] for name in dataset.features[ACTION_JOINT]["names"]])
+    busy_wait(1.0 / dataset.fps - (time.perf_counter() - t0))
+
 
 # 原始 joint 数据
 original_joints = [

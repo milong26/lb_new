@@ -7,3 +7,4 @@
 2. 可视化数据集：python src/lerobot/scripts/lerobot_dataset_viz.py --repo-id test/joint_ee --episode-index 0这样执行，如果直接用脚本的话不行
 3. replay：用ee的树脂replay，需要反解。python examples/so100_to_so100_EE/new_replay.py 
 4. compre：比较真实action和ik解出的action，绘制图片
+5. fine-tune：注意修改ACTION和STATE？但是有点麻烦

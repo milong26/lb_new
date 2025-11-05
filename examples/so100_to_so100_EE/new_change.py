@@ -28,9 +28,9 @@ from lerobot.utils.control_utils import init_keyboard_listener
 from lerobot.utils.utils import log_say
 
 # 加载数据集
-local_dataset_path = "/home/qwe/.cache/huggingface/lerobot/test/joint"
+local_dataset_path = "/home/qwe/.cache/huggingface/lerobot/complex/joint"
 dataset = LeRobotDataset(
-    repo_id="test/joint",
+    repo_id="complex/joint",
     root=local_dataset_path,
 )
 
@@ -86,12 +86,12 @@ new_features["observation.state_ee"] = {
 }
 
 # ---------- 创建新的空数据集 ----------
-new_dataset_path = "/home/qwe/.cache/huggingface/lerobot/test/joint_ee"
+new_dataset_path = "/home/qwe/.cache/huggingface/lerobot/complex/joint_ee"
 FPS = dataset.meta.fps
 ROBOT_TYPE = dataset.meta.robot_type
 
 new_dataset = LeRobotDataset.create(
-    repo_id="test/joint_ee",
+    repo_id="complex/joint_ee",
     root=new_dataset_path,
     features=new_features,
     fps=FPS,

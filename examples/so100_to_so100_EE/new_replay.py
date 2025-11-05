@@ -24,7 +24,7 @@ from lerobot.utils.robot_utils import busy_wait
 from lerobot.utils.utils import log_say
 
 EPISODE_IDX = 0
-HF_REPO_ID = "test/joint_ee"
+HF_REPO_ID = "complex/joint_ee"
 
 # Initialize the robot config
 robot_config = SO100FollowerConfig(
