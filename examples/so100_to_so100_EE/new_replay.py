@@ -24,12 +24,12 @@ from lerobot.utils.robot_utils import busy_wait
 from lerobot.utils.utils import log_say
 
 EPISODE_IDX = 0
-HF_REPO_ID = "complex/joint_ee"
+HF_REPO_ID = "test_10/ee_ee"
 
 # Initialize the robot config
 robot_config = SO100FollowerConfig(
     port="/dev/ttyACM0",  # 对应 YAML 的 follower port
-    id="congbi",           # YAML 中 follower id
+    id="follower",           # YAML 中 follower id
     use_degrees=True
 )
 

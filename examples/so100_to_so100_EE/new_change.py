@@ -28,9 +28,9 @@ from lerobot.utils.control_utils import init_keyboard_listener
 from lerobot.utils.utils import log_say
 
 # 加载数据集
-local_dataset_path = "/home/qwe/.cache/huggingface/lerobot/complex/joint"
+local_dataset_path = "/home/qwe/.cache/huggingface/lerobot/119/joint"
 dataset = LeRobotDataset(
-    repo_id="complex/joint",
+    repo_id="110/joint",
     root=local_dataset_path,
 )
 
@@ -86,12 +86,12 @@ new_features["observation.state_ee"] = {
 }
 
 # ---------- 创建新的空数据集 ----------
-new_dataset_path = "/home/qwe/.cache/huggingface/lerobot/complex/joint_ee"
+new_dataset_path = "/home/qwe/.cache/huggingface/lerobot/119/ee"
 FPS = dataset.meta.fps
 ROBOT_TYPE = dataset.meta.robot_type
 
 new_dataset = LeRobotDataset.create(
-    repo_id="complex/joint_ee",
+    repo_id="119/ee",
     root=new_dataset_path,
     features=new_features,
     fps=FPS,
@@ -127,6 +127,10 @@ for idx in range(len(dataset)):
     if "observation.images.wrist" in enhanced_sample:
         # (C, H, W) -> (H, W, C)
         enhanced_sample["observation.images.wrist"] = enhanced_sample["observation.images.wrist"].permute(1, 2, 0)
+    # 为什么要先处理图像The feature 'observation.images.side' of shape '(3, 480, 640)' does not have the expected shape '(480, 640, 3)' or '(640, 3, 480)'.
+    if "observation.images.side" in enhanced_sample:
+        # (C, H, W) -> (H, W, C)
+        enhanced_sample["observation.images.side"] = enhanced_sample["observation.images.side"].permute(1, 2, 0)
 
     new_dataset.add_frame(enhanced_sample)
 

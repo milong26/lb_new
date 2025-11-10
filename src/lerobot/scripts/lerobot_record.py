@@ -299,6 +299,7 @@ def record_loop(
         obs = robot.get_observation()
 
         # Applies a pipeline to the raw robot observation, default is IdentityProcessor
+        # 只是用来存储的
         obs_processed = robot_observation_processor(obs)
 
         if policy is not None or dataset is not None:
@@ -320,6 +321,7 @@ def record_loop(
             act_processed_policy: RobotAction = make_robot_action(action_values, dataset.features)
 
         elif policy is None and isinstance(teleop, Teleoperator):
+            # 原始act
             act = teleop.get_action()
 
             # Applies a pipeline to the raw teleop action, default is IdentityProcessor

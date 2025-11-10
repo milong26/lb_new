@@ -18,12 +18,12 @@ ACTION_EE = "action_ee"
 ACTION_JOINT = "action"
 
 EPISODE_IDX = 0
-HF_REPO_ID = "complex/joint_ee"
+HF_REPO_ID = "119/ee"
 
 # Initialize the robot config (只是用来获取关节名字，不一定需要连接)
 robot_config = SO100FollowerConfig(
     port="/dev/ttyACM0",
-    id="congbi",
+    id="follower",
     use_degrees=True
 )
 robot = SO100Follower(robot_config)

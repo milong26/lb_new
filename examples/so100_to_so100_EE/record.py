@@ -16,6 +16,7 @@
 
 
 from lerobot.cameras.opencv.configuration_opencv import OpenCVCameraConfig
+from lerobot.cameras.realsense.configuration_realsense import RealSenseCameraConfig
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.datasets.pipeline_features import aggregate_pipeline_dataset_features, create_initial_features
 from lerobot.datasets.utils import combine_feature_dicts
@@ -43,22 +44,22 @@ from lerobot.utils.visualization_utils import init_rerun
 
 NUM_EPISODES = 1
 FPS = 30
-EPISODE_TIME_SEC = 20
+EPISODE_TIME_SEC = 60
 RESET_TIME_SEC = 2
 TASK_DESCRIPTION = "pick up the pyramid-shaped sachet and place it into the box."
-HF_REPO_ID = "test/ee"
+HF_REPO_ID = "test1110/ee"
 
 # 摄像头配置
 camera_config = {
-    "wrist": OpenCVCameraConfig(index_or_path=0, width=640, height=480, fps=FPS)
+    "wrist": OpenCVCameraConfig(index_or_path=6, width=640, height=480, fps=FPS),
     # 如果以后要加 side 摄像头可以在这里添加
-    # "side": IntelRealsenseConfig(serial_number_or_name="806312060427", width=640, height=480, fps=FPS, use_depth=True)
+    "side": RealSenseCameraConfig(serial_number_or_name="806312060427", width=640, height=480, fps=FPS, use_depth=False)
 }
 
 # 机器人配置
 follower_config = SO100FollowerConfig(
     port="/dev/ttyACM0",  # 对应 YAML 的 follower port
-    id="congbi",           # YAML 中 follower id
+    id="follower",           # YAML 中 follower id
     cameras=camera_config,
     use_degrees=True
 )
@@ -66,7 +67,7 @@ follower_config = SO100FollowerConfig(
 # 遥操作臂配置
 leader_config = SO100LeaderConfig(
     port="/dev/ttyACM1",  # 对应 YAML 的 teleop port
-    id="zhubi"             # YAML 中 teleop id
+    id="leader"             # YAML 中 teleop id
 )
 
 # 个性化显示
@@ -129,22 +130,6 @@ ee_to_follower_joints = RobotProcessorPipeline[tuple[RobotAction, RobotObservati
     ],
     to_transition=robot_action_observation_to_transition,
     to_output=transition_to_robot_action,
-)
-
-
-features=combine_feature_dicts(
-    # Run the feature contract of the pipelines
-    # This tells you how the features would look like after the pipeline steps
-    aggregate_pipeline_dataset_features(
-        pipeline=leader_joints_to_ee,
-        initial_features=create_initial_features(action=leader.action_features),
-        use_videos=True,
-    ),
-    aggregate_pipeline_dataset_features(
-        pipeline=follower_joints_to_ee,
-        initial_features=create_initial_features(observation=follower.observation_features),
-        use_videos=True,
-    ),
 )
 
 
