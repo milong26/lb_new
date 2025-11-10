@@ -42,13 +42,13 @@ from lerobot.utils.control_utils import init_keyboard_listener
 from lerobot.utils.utils import log_say
 from lerobot.utils.visualization_utils import init_rerun
 
-NUM_EPISODES = 1
+NUM_EPISODES = 20
 FPS = 30
 EPISODE_TIME_SEC = 60
 RESET_TIME_SEC = 2
-TASK_DESCRIPTION = "pick up the pyramid-shaped sachet and place it into the box."
+TASK_DESCRIPTION = "pick up the yellow sachet and place it into the box."
 init_rerun(session_name="recording_phone")
-HF_REPO_ID = "test1110/ee"
+HF_REPO_ID = "test1110/ee_4"
 
 # 摄像头配置
 camera_config = {
