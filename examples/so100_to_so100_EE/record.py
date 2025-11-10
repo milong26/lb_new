@@ -47,6 +47,7 @@ FPS = 30
 EPISODE_TIME_SEC = 60
 RESET_TIME_SEC = 2
 TASK_DESCRIPTION = "pick up the pyramid-shaped sachet and place it into the box."
+init_rerun(session_name="recording_phone")
 HF_REPO_ID = "test1110/ee"
 
 # 摄像头配置
@@ -132,26 +133,55 @@ ee_to_follower_joints = RobotProcessorPipeline[tuple[RobotAction, RobotObservati
     to_output=transition_to_robot_action,
 )
 
+new_features=combine_feature_dicts(
+    # Run the feature contract of the pipelines
+    # This tells you how the features would look like after the pipeline steps
+    aggregate_pipeline_dataset_features(
+        pipeline=leader_joints_to_ee,
+        initial_features=create_initial_features(action=leader.action_features),
+        use_videos=True,
+    ),
+    aggregate_pipeline_dataset_features(
+        pipeline=follower_joints_to_ee,
+        initial_features=create_initial_features(observation=follower.observation_features),
+        use_videos=True,
+    ),
+    # 新增两个feature：action_joint和state_joint  
+)
 
+# 增加两个feature
+new_features["joint_action"] = {
+    "dtype": "float32",
+    "shape": (6,),
+    "names": ["shoulder_pan.pos",
+                "shoulder_lift.pos",
+                "elbow_flex.pos",
+                "wrist_flex.pos",
+                "wrist_roll.pos",
+                "gripper.pos"
+            ],
+    # "names": ["ee.x", "ee.y", "ee.z", "ee.wx", "ee.wy", "ee.wz", "ee.gripper_pos"],
+}
 
+# observation.state_ee
+new_features["observation.joint_state"] = {
+    "dtype": "float32",
+    "shape": (6,),
+     "names": [
+                "shoulder_pan.pos",
+                "shoulder_lift.pos",
+                "elbow_flex.pos",
+                "wrist_flex.pos",
+                "wrist_roll.pos",
+                "gripper.pos"
+            ],
+}
+# print("检查",new_features)
 # Create the dataset
 dataset = LeRobotDataset.create(
     repo_id=HF_REPO_ID,
     fps=FPS,
-    features=combine_feature_dicts(
-        # Run the feature contract of the pipelines
-        # This tells you how the features would look like after the pipeline steps
-        aggregate_pipeline_dataset_features(
-            pipeline=leader_joints_to_ee,
-            initial_features=create_initial_features(action=leader.action_features),
-            use_videos=True,
-        ),
-        aggregate_pipeline_dataset_features(
-            pipeline=follower_joints_to_ee,
-            initial_features=create_initial_features(observation=follower.observation_features),
-            use_videos=True,
-        ),
-    ),
+    features=new_features,
     robot_type=follower.name,
     use_videos=True,
     image_writer_threads=4,
@@ -164,7 +194,7 @@ follower.connect()
 
 # Initialize the keyboard listener and rerun visualization
 listener, events = init_keyboard_listener()
-init_rerun(session_name="recording_phone")
+
 
 if not leader.is_connected or not follower.is_connected:
     raise ValueError("Robot or teleop is not connected!")

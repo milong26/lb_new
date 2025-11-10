@@ -285,6 +285,7 @@ def record_loop(
         policy.reset()
         preprocessor.reset()
         postprocessor.reset()
+    identity_teleop_action_processor, identity_robot_action_processor, identity_robot_observation_processor = make_default_processors()
 
     timestamp = 0
     start_episode_t = time.perf_counter()
@@ -301,6 +302,21 @@ def record_loop(
         # Applies a pipeline to the raw robot observation, default is IdentityProcessor
         # 只是用来存储的
         obs_processed = robot_observation_processor(obs)
+        
+        # 额外增加state_joint
+        joint_keys = [
+            "shoulder_pan.pos",
+            "shoulder_lift.pos",
+            "elbow_flex.pos",
+            "wrist_flex.pos",
+            "wrist_roll.pos",
+            "gripper.pos",
+        ]
+
+        # 将 obs 中的关节角数据注入 obs_processed
+        for key in joint_keys:
+            if key in obs:  # 确保obs中有这个值
+                obs_processed[key] = obs[key]
 
         if policy is not None or dataset is not None:
             observation_frame = build_dataset_frame(dataset.features, obs_processed, prefix=OBS_STR)
@@ -326,6 +342,7 @@ def record_loop(
 
             # Applies a pipeline to the raw teleop action, default is IdentityProcessor
             act_processed_teleop = teleop_action_processor((act, obs))
+            act_not_processed_teleop = identity_teleop_action_processor((act, obs))
 
         elif policy is None and isinstance(teleop, list):
             arm_action = teleop_arm.get_action()
@@ -356,10 +373,19 @@ def record_loop(
         # TODO(steven, pepijn, adil): we should use a pipeline step to clip the action, so the sent action is the action that we input to the robot.
         _sent_action = robot.send_action(robot_action_to_send)
 
+
+
+
+        # 新增 state_joint
         # Write to dataset
         if dataset is not None:
+            action_joint_frame = build_dataset_frame(
+                dataset.features, 
+                act_not_processed_teleop,                  # teleop 原始 joints
+                prefix="joint_action" # 因为utils里面这么写的if key in DEFAULT_FEATURES or not key.startswith(prefix):，所以不能用action_joint
+            )
             action_frame = build_dataset_frame(dataset.features, action_values, prefix=ACTION)
-            frame = {**observation_frame, **action_frame, "task": single_task}
+            frame = {**observation_frame,**action_joint_frame, **action_frame, "task": single_task}
             dataset.add_frame(frame)
 
         if display_data:
