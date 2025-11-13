@@ -379,13 +379,14 @@ def record_loop(
         # 新增 state_joint
         # Write to dataset
         if dataset is not None:
-            action_joint_frame = build_dataset_frame(
-                dataset.features, 
-                act_not_processed_teleop,                  # teleop 原始 joints
-                prefix="joint_action" # 因为utils里面这么写的if key in DEFAULT_FEATURES or not key.startswith(prefix):，所以不能用action_joint
-            )
+            # action_joint_frame = build_dataset_frame(
+            #     dataset.features, 
+            #     act_not_processed_teleop,                  # teleop 原始 joints
+            #     prefix="joint_action" # 因为utils里面这么写的if key in DEFAULT_FEATURES or not key.startswith(prefix):，所以不能用action_joint
+            # )
             action_frame = build_dataset_frame(dataset.features, action_values, prefix=ACTION)
-            frame = {**observation_frame,**action_joint_frame, **action_frame, "task": single_task}
+            # frame = {**observation_frame,**action_joint_frame, **action_frame, "task": single_task}
+            frame = {**observation_frame, **action_frame, "task": single_task}
             dataset.add_frame(frame)
 
         if display_data:

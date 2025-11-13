@@ -15,13 +15,15 @@
 # limitations under the License.
 
 from lerobot.cameras.opencv.configuration_opencv import OpenCVCameraConfig
+from lerobot.cameras.realsense.configuration_realsense import RealSenseCameraConfig
 from lerobot.configs.types import FeatureType, PolicyFeature
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.datasets.pipeline_features import aggregate_pipeline_dataset_features, create_initial_features
 from lerobot.datasets.utils import combine_feature_dicts
 from lerobot.model.kinematics import RobotKinematics
-from lerobot.policies.act.modeling_act import ACTPolicy
+# from lerobot.policies.act.modeling_act import ACTPolicy
 from lerobot.policies.factory import make_pre_post_processors
+from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
 from lerobot.processor import (
     RobotAction,
     RobotObservation,
@@ -45,30 +47,34 @@ from lerobot.utils.control_utils import init_keyboard_listener
 from lerobot.utils.utils import log_say
 from lerobot.utils.visualization_utils import init_rerun
 
-NUM_EPISODES = 5
+NUM_EPISODES = 1
 FPS = 30
 EPISODE_TIME_SEC = 60
-TASK_DESCRIPTION = "My task description"
-HF_MODEL_ID = "<hf_username>/<model_repo_id>"
-HF_DATASET_ID = "<hf_username>/<dataset_repo_id>"
+TASK_DESCRIPTION = "pick up the yellow sachet and place it into the box."
+HF_MODEL_ID = "outputs/train/ee_action_ee_state/checkpoints/020000/pretrained_model"
+HF_DATASET_ID = "eva/test1"
 
 # Create the robot configuration & robot
-camera_config = {"front": OpenCVCameraConfig(index_or_path=0, width=640, height=480, fps=FPS)}
+camera_config = {
+    "wrist": OpenCVCameraConfig(index_or_path=6, width=640, height=480, fps=FPS),
+    # 如果以后要加 side 摄像头可以在这里添加
+    "side": RealSenseCameraConfig(serial_number_or_name="806312060427", width=640, height=480, fps=FPS, use_depth=False)
+}
 robot_config = SO100FollowerConfig(
-    port="/dev/tty.usbmodem5A460814411",
-    id="my_awesome_follower_arm",
+    port="/dev/ttyACM0",  # 对应 YAML 的 follower port
+    id="follower",           # YAML 中 follower id
     cameras=camera_config,
-    use_degrees=True,
+    use_degrees=True
 )
 
 robot = SO100Follower(robot_config)
 
 # Create policy
-policy = ACTPolicy.from_pretrained(HF_MODEL_ID)
+policy = SmolVLAPolicy.from_pretrained(HF_MODEL_ID)
 
 # NOTE: It is highly recommended to use the urdf in the SO-ARM100 repo: https://github.com/TheRobotStudio/SO-ARM100/blob/main/Simulation/SO101/so101_new_calib.urdf
 kinematics_solver = RobotKinematics(
-    urdf_path="./SO101/so101_new_calib.urdf",
+    urdf_path="SO-ARM100/Simulation/SO101/so101_new_calib.urdf",
     target_frame_name="gripper_frame_link",
     joint_names=list(robot.bus.motors.keys()),
 )
