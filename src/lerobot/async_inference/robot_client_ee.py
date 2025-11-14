@@ -102,14 +102,14 @@ class RobotClientEE:
             to_output=transition_to_observation,
         )
         self.robot.connect()
-        # TODO 这个feature需要修改成ee的，需要跟policy对应吗？
-        # lerobot_features = map_robot_keys_to_lerobot_features(self.robot)
+        lerobot_features = map_robot_keys_to_lerobot_features(self.robot)
         ee_feature=aggregate_pipeline_dataset_features(
             pipeline=self.joints_to_ee,
             initial_features=create_initial_features(observation=self.robot.observation_features),
             use_videos=True,
         )
-        lerobot_features_ee_state={'observation.state': ee_feature['observation.state']}
+        lerobot_features_ee_state=lerobot_features.copy()
+        lerobot_features_ee_state['observation.state']=ee_feature['observation.state']
         self.action_feature_ee= {name: float for name in ee_feature['action']['names']}
         # Use environment variable if server_address is not provided in config
         self.server_address = config.server_address
@@ -150,10 +150,6 @@ class RobotClientEE:
         self.must_go = threading.Event()
         self.must_go.set()  # Initially set - observations qualify for direct processing
 
-        # 为了适应增加的
-        # TODO
-        # self.robot.action_features=
-
 
     @property
     def running(self):
@@ -187,6 +183,7 @@ class RobotClientEE:
 
         except grpc.RpcError as e:
             self.logger.error(f"Failed to connect to policy server: {e}")
+            self.robot.disconnect()
             return False
 
     def stop(self):
@@ -302,6 +299,7 @@ class RobotClientEE:
 
                 # Deserialize bytes back into list[TimedAction]
                 deserialize_start = time.perf_counter()
+                # 这里会出现一个bug见github.com/huggingface/lerobot/issues/2244，可以在policy_server那里修改
                 timed_actions = pickle.loads(actions_chunk.data)  # nosec
                 deserialize_time = time.perf_counter() - deserialize_start
 
@@ -368,9 +366,6 @@ class RobotClientEE:
             return not self.action_queue.empty()
 
     # def _action_tensor_to_action_dict(self, action_tensor: torch.Tensor) -> dict[str, float]:
-    #     # TODO 这里不能用self.robot.action_features，要改成ee_feature
-    #     action = {key: action_tensor[i].item() for i, key in enumerate(self.robot.action_features)}
-    #     return action
     def _action_tensor_to_action_dict(self, action_tensor: torch.Tensor) -> dict[str, float]:
         # TODO 这里不能用self.robot.action_features，要改成ee_feature
         action = {key: action_tensor[i].item() for i, key in enumerate(self.action_features_ee)}
