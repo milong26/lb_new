@@ -18,6 +18,11 @@ from typing import Any
 
 import draccus
 import grpc
+from lerobot.datasets.pipeline_features import aggregate_pipeline_dataset_features, create_initial_features
+from lerobot.model.kinematics import RobotKinematics
+from lerobot.processor.core import RobotAction, RobotObservation
+from lerobot.processor.pipeline import RobotProcessorPipeline
+from lerobot.robots.so100_follower.robot_kinematic_processor import EEBoundsAndSafety, ForwardKinematicsJointsToEE, InverseKinematicsEEToJoints
 import torch
 
 from lerobot.cameras.opencv.configuration_opencv import OpenCVCameraConfig  # noqa: F401
@@ -66,19 +71,53 @@ class RobotClientEE:
         # Store configuration
         self.config = config
         self.robot = make_robot_from_config(config.robot)
+
+        # joint->ee的数据处理，solver+ee->joint+joint->ee
+        self.robot_kinematics_solver = RobotKinematics(
+            urdf_path="SO-ARM100/Simulation/SO101/so101_new_calib.urdf",
+            target_frame_name="gripper_frame_link",
+            joint_names=list(self.robot.bus.motors.keys()),
+        )
+        self.joints_to_ee = RobotProcessorPipeline[RobotObservation, RobotObservation](
+            steps=[
+                ForwardKinematicsJointsToEE(
+                    kinematics=self.robot_kinematics_solver,
+                    motor_names=list(self.robot.bus.motors.keys())
+                ),],
+            to_transition=observation_to_transition,
+            to_output=transition_to_observation,
+        )
+        self.ee_to_follower_joints = RobotProcessorPipeline[tuple[RobotAction, RobotObservation], RobotAction](
+            steps=[
+                EEBoundsAndSafety(
+                    end_effector_bounds={"min": [-1.0, -1.0, -1.0], "max": [1.0, 1.0, 1.0]},
+                    max_ee_step_m=0.10,
+                ),
+                InverseKinematicsEEToJoints(
+                    kinematics=self.robot_kinematics_solver,
+                    motor_names=list(self.robot.bus.motors.keys()),
+                    initial_guess_current_joints=True,
+                ),],
+            to_transition=observation_to_transition,
+            to_output=transition_to_observation,
+        )
         self.robot.connect()
         # TODO 这个feature需要修改成ee的，需要跟policy对应吗？
-        lerobot_features = map_robot_keys_to_lerobot_features(self.robot)
-        print("原本的feature",lerobot_features)
-
+        # lerobot_features = map_robot_keys_to_lerobot_features(self.robot)
+        ee_feature=aggregate_pipeline_dataset_features(
+            pipeline=self.joints_to_ee,
+            initial_features=create_initial_features(observation=self.robot.observation_features),
+            use_videos=True,
+        )
+        lerobot_features_ee_state={'observation.state': ee_feature['observation.state']}
+        self.action_feature_ee= {name: float for name in ee_feature['action']['names']}
         # Use environment variable if server_address is not provided in config
         self.server_address = config.server_address
 
         self.policy_config = RemotePolicyConfig(
             config.policy_type,
             config.pretrained_name_or_path,
-            # 这里需要改成ee的state和action
-            lerobot_features, 
+            lerobot_features_ee_state, 
             config.actions_per_chunk,
             config.policy_device,
         )
@@ -110,37 +149,10 @@ class RobotClientEE:
         # Use an event for thread-safe coordination
         self.must_go = threading.Event()
         self.must_go.set()  # Initially set - observations qualify for direct processing
-        # joint->ee的数据处理，solver+ee->joint+joint->ee
-        self.robot_kinematics_solver = RobotKinematics(
-            urdf_path="SO-ARM100/Simulation/SO101/so101_new_calib.urdf",
-            target_frame_name="gripper_frame_link",
-            joint_names=list(self.robot.bus.motors.keys()),
-        )
-        self.joints_to_ee = RobotProcessorPipeline[RobotObservation, RobotObservation](
-            steps=[
-                ForwardKinematicsJointsToEE(
-                    kinematics=self.robot_kinematics_solver,
-                    motor_names=list(self.robot.bus.motors.keys())
-                ),]
-            to_transition=observation_to_transition,
-            to_output=transition_to_observation,
-        )
-        self.ee_to_follower_joints = RobotProcessorPipeline[tuple[RobotAction, RobotObservation], RobotAction](
-            steps=[
-                EEBoundsAndSafety(
-                    end_effector_bounds={"min": [-1.0, -1.0, -1.0], "max": [1.0, 1.0, 1.0]},
-                    max_ee_step_m=0.10,
-                ),
-                InverseKinematicsEEToJoints(
-                    kinematics=self.robot_kinematics_solver,
-                    motor_names=list(self.robot.bus.motors.keys()),
-                    initial_guess_current_joints=True,
-                ),],
-            to_transition=observation_to_transition,
-            to_output=transition_to_observation,
-        )
+
         # 为了适应增加的
-        self.robot.action_features=
+        # TODO
+        # self.robot.action_features=
 
 
     @property
@@ -361,7 +373,7 @@ class RobotClientEE:
     #     return action
     def _action_tensor_to_action_dict(self, action_tensor: torch.Tensor) -> dict[str, float]:
         # TODO 这里不能用self.robot.action_features，要改成ee_feature
-        action = {key: action_tensor[i].item() for i, key in enumerate(self.ee_action_features)}
+        action = {key: action_tensor[i].item() for i, key in enumerate(self.action_features_ee)}
         return action
 
     def control_loop_action(self, verbose: bool = False) -> dict[str, Any]:
@@ -493,7 +505,7 @@ def async_client(cfg: RobotClientConfig):
     if cfg.robot.type not in SUPPORTED_ROBOTS:
         raise ValueError(f"Robot {cfg.robot.type} not yet supported!")
 
-    client = RobotClient(cfg)
+    client = RobotClientEE(cfg)
 
     if client.start():
         client.logger.info("Starting action receiver thread...")

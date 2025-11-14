@@ -38,6 +38,7 @@ from lerobot.processor.converters import (
 )
 from lerobot.robots.so100_follower.config_so100_follower import SO100FollowerConfig
 from lerobot.robots.so100_follower.robot_kinematic_processor import (
+    EEBoundsAndSafety,
     ForwardKinematicsJointsToEE,
     InverseKinematicsEEToJoints,
 )
@@ -81,18 +82,17 @@ kinematics_solver = RobotKinematics(
 
 # Build pipeline to convert EE action to joints action
 robot_ee_to_joints_processor = RobotProcessorPipeline[tuple[RobotAction, RobotObservation], RobotAction](
-    steps=[
+    [
+        EEBoundsAndSafety(
+            end_effector_bounds={"min": [-1.0, -1.0, -1.0], "max": [1.0, 1.0, 1.0]},
+            max_ee_step_m=0.10,
+        ),
         InverseKinematicsEEToJoints(
             kinematics=kinematics_solver,
             motor_names=list(robot.bus.motors.keys()),
             initial_guess_current_joints=True,
         ),
     ],
-    # 为什么推理代码没有加上安全限制？
-    EEBoundsAndSafety(
-        end_effector_bounds={"min": [-1.0, -1.0, -1.0], "max": [1.0, 1.0, 1.0]},
-        max_ee_step_m=0.10,
-    ),
     to_transition=robot_action_observation_to_transition,
     to_output=transition_to_robot_action,
 )
