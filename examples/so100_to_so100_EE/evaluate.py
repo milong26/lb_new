@@ -82,6 +82,11 @@ robot_ee_to_joints_processor = RobotProcessorPipeline[tuple[RobotAction, RobotOb
             initial_guess_current_joints=True,
         ),
     ],
+    # 为什么推理代码没有加上安全限制？
+    EEBoundsAndSafety(
+        end_effector_bounds={"min": [-1.0, -1.0, -1.0], "max": [1.0, 1.0, 1.0]},
+        max_ee_step_m=0.10,
+    ),
     to_transition=robot_action_observation_to_transition,
     to_output=transition_to_robot_action,
 )

@@ -285,6 +285,7 @@ def record_loop(
         policy.reset()
         preprocessor.reset()
         postprocessor.reset()
+    # 新增的，这三个是默认
     identity_teleop_action_processor, identity_robot_action_processor, identity_robot_observation_processor = make_default_processors()
 
     timestamp = 0
@@ -322,6 +323,7 @@ def record_loop(
             observation_frame = build_dataset_frame(dataset.features, obs_processed, prefix=OBS_STR)
 
         # Get action from either policy or teleop
+        # preprocessor和postprocessor这些处理器通过 PolicyProcessorPipeline 组合使用，实现数据格式转换、归一化、设备迁移等功能，确保策略能正确处理机器人观测数据并输出有效动作
         if policy is not None and preprocessor is not None and postprocessor is not None:
             action_values = predict_action(
                 observation=observation_frame,
