@@ -263,6 +263,8 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
             return services_pb2.Empty()
 
         except Exception as e:
+            # 比较危险但我受不了看不出来报错信息了
+            self.shutdown_event.set()
             self.logger.error(f"Error in StreamActions: {e}")
 
             return services_pb2.Empty()

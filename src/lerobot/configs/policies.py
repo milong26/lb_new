@@ -174,22 +174,23 @@ class PreTrainedConfig(draccus.ChoiceRegistry, HubMixin, abc.ABC):  # type: igno
             else:
                 logger.error(f"{CONFIG_NAME} not found in {Path(model_id).resolve()}")
         else:
-            try:
-                config_file = hf_hub_download(
-                    repo_id=model_id,
-                    filename=CONFIG_NAME,
-                    revision=revision,
-                    cache_dir=cache_dir,
-                    force_download=force_download,
-                    proxies=proxies,
-                    resume_download=resume_download,
-                    token=token,
-                    local_files_only=local_files_only,
-                )
-            except HfHubHTTPError as e:
-                raise FileNotFoundError(
-                    f"{CONFIG_NAME} not found on the HuggingFace Hub in {model_id}"
-                ) from e
+            raise FileExistsError(f"传入的pretrained_name_or_path:{pretrained_name_or_path}在PreTrainedConfig这里判断Path is_dir()失败")
+            # try:
+            #     config_file = hf_hub_download(
+            #         repo_id=model_id,
+            #         filename=CONFIG_NAME,
+            #         revision=revision,
+            #         cache_dir=cache_dir,
+            #         force_download=force_download,
+            #         proxies=proxies,
+            #         resume_download=resume_download,
+            #         token=token,
+            #         local_files_only=local_files_only,
+            #     )
+            # except HfHubHTTPError as e:
+            #     raise FileNotFoundError(
+            #         f"{CONFIG_NAME} not found on the HuggingFace Hub in {model_id}"
+            #     ) from e
 
         # HACK: Parse the original config to get the config subclass, so that we can
         # apply cli overrides.
