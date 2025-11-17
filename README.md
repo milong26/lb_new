@@ -9,3 +9,4 @@
 4. compre：比较真实action和ik解出的action，绘制图片
 5. 重新写了代码，直接运行record，修改了reocrd_loop函数以同时保存joint形式的action和state，目前是分别用observation.joint_state和joint_action形式存储的，后期再改。可能observation.state.joint.shoulder_pan...和action.joint.shoulder_pan这样？按照原来的值可能还得再叠加一层pos
 6. 用采集后的数据fine-tune
+7. async-inference on ee 测试成功，一定要和采集的robot配置一样

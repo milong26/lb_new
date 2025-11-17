@@ -98,8 +98,8 @@ class RobotClientEE:
                     motor_names=list(self.robot.bus.motors.keys()),
                     initial_guess_current_joints=True,
                 ),],
-            to_transition=observation_to_transition,
-            to_output=transition_to_observation,
+            to_transition=robot_action_observation_to_transition,
+            to_output=transition_to_robot_action,
         )
         self.robot.connect()
         lerobot_features = map_robot_keys_to_lerobot_features(self.robot)
@@ -110,7 +110,7 @@ class RobotClientEE:
         )
         lerobot_features_ee_state=lerobot_features.copy()
         lerobot_features_ee_state['observation.state']=ee_feature['observation.state']
-        self.action_feature_ee= {name: float for name in ee_feature['action']['names']}
+        self.action_features_ee= {name: float for name in ee_feature['action']['names']}
         # Use environment variable if server_address is not provided in config
         self.server_address = config.server_address
 
@@ -386,8 +386,9 @@ class RobotClientEE:
         # _performed_action = self.robot.send_action(
         #     self._action_tensor_to_action_dict(timed_action.get_action())
         # )
+        obs=self.robot.get_observation()
         ee_action = self._action_tensor_to_action_dict(timed_action.get_action())
-        joint_action = self.ee_to_follower_joints((ee_action, self.latest_joint_observation))
+        joint_action = self.ee_to_follower_joints((ee_action,obs))
         _performed_action = self.robot.send_action(joint_action)
 
 

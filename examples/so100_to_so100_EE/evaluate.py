@@ -51,9 +51,9 @@ from lerobot.utils.visualization_utils import init_rerun
 NUM_EPISODES = 1
 FPS = 30
 EPISODE_TIME_SEC = 60
-TASK_DESCRIPTION = "pick up the yellow sachet and place it into the box."
+TASK_DESCRIPTION = "pick up the yellow sponge and place it into the box."
 HF_MODEL_ID = "outputs/train/ee_action_ee_state/checkpoints/020000/pretrained_model"
-HF_DATASET_ID = "eva/test1"
+HF_DATASET_ID = "eva/test2"
 
 # Create the robot configuration & robot
 camera_config = {
@@ -208,4 +208,4 @@ robot.disconnect()
 listener.stop()
 
 dataset.finalize()
-dataset.push_to_hub()
+# dataset.push_to_hub()
