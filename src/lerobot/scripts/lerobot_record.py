@@ -147,7 +147,7 @@ class DatasetRecordConfig:
     # Encode frames in the dataset into video
     video: bool = True
     # Upload dataset to Hugging Face hub.
-    push_to_hub: bool = True
+    push_to_hub: bool = False
     # Upload on private repository on the Hugging Face hub.
     private: bool = False
     # Add tags to your dataset on the hub.
@@ -232,7 +232,8 @@ class RecordConfig:
                                V
                   ( Rerun Log / Loop Wait )
 """
-
+import numpy as np
+import cv2
 
 @safe_stop_image_writer
 def record_loop(
@@ -298,7 +299,25 @@ def record_loop(
             break
 
         # Get robot observation
+        # obs = robot.get_observation()
+
+
+        # 1. 先加载之前计算好的单应性矩阵 H
+        # H = np.load("homography.npy")  # shape (3,3)
+
+        # 2. 假设你在循环里获取obs后，直接对camera1的图像做变换
         obs = robot.get_observation()
+        # 测试：代码的值留下来给服务器试试
+        # import pickle
+        # with open("obs.pkl", "wb") as f:
+        #     pickle.dump(obs, f)
+
+        # if "side" in obs:
+        #     img = obs["side"]  # 这里 img 是 numpy array 格式
+        #     h, w = img.shape[:2]
+        #     # 将新位置图像映射到旧位置视角
+        #     warped_img = cv2.warpPerspective(img, H, (w, h))
+        #     obs["side"] = warped_img  # 覆盖原来的图像
 
         # Applies a pipeline to the raw robot observation, default is IdentityProcessor
         # 只是用来存储的
@@ -362,6 +381,7 @@ def record_loop(
             continue
 
         # Applies a pipeline to the action, default is IdentityProcessor
+        obs=robot.get_observation()
         if policy is not None and act_processed_policy is not None:
             action_values = act_processed_policy
             robot_action_to_send = robot_action_processor((act_processed_policy, obs))
@@ -373,11 +393,9 @@ def record_loop(
         # Action can eventually be clipped using `max_relative_target`,
         # so action actually sent is saved in the dataset. action = postprocessor.process(action)
         # TODO(steven, pepijn, adil): we should use a pipeline step to clip the action, so the sent action is the action that we input to the robot.
+        print(f"ee-action是{act_processed_policy},观察的obs：shoulder_pan.pos={obs['shoulder_pan.pos']},shoulder_lift.pos={obs['shoulder_lift.pos']},elbow_flex.pos={obs['elbow_flex.pos']},wrist_flex.pos={obs['wrist_flex.pos']},wrist_roll.pos={obs['wrist_roll.pos']},gripper={obs['gripper.pos']},当前的joint_action{robot_action_to_send}")
         _sent_action = robot.send_action(robot_action_to_send)
-
-
-
-
+        
         # 新增 state_joint
         # Write to dataset
         if dataset is not None:
@@ -535,8 +553,8 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
     if not is_headless() and listener is not None:
         listener.stop()
 
-    if cfg.dataset.push_to_hub:
-        dataset.push_to_hub(tags=cfg.dataset.tags, private=cfg.dataset.private)
+    # if cfg.dataset.push_to_hub:
+    #     dataset.push_to_hub(tags=cfg.dataset.tags, private=cfg.dataset.private)
 
     log_say("Exiting", cfg.play_sounds)
     return dataset

@@ -109,8 +109,10 @@ def predict_action(
         # Compute the next action with the policy
         # based on the current observation
         action = policy.select_action(observation)
+        print("选择的action",action)
 
         action = postprocessor(action)
+        print("postprocessor之后",action)
 
     return action
 

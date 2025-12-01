@@ -141,6 +141,8 @@ class RobotClientConfig:
     debug_visualize_queue_size: bool = field(
         default=False, metadata={"help": "Visualize the action queue size"}
     )
+    # 我服了居然没有
+    rename_map: dict[str, str] = field(default_factory=dict)
 
     @property
     def environment_dt(self) -> float:

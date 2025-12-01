@@ -23,6 +23,7 @@ from lerobot.model.kinematics import RobotKinematics
 from lerobot.processor.core import RobotAction, RobotObservation
 from lerobot.processor.pipeline import RobotProcessorPipeline
 from lerobot.robots.so100_follower.robot_kinematic_processor import EEBoundsAndSafety, ForwardKinematicsJointsToEE, InverseKinematicsEEToJoints
+from pynput import keyboard
 import torch
 
 from lerobot.cameras.opencv.configuration_opencv import OpenCVCameraConfig  # noqa: F401
@@ -120,6 +121,7 @@ class RobotClientEE:
             lerobot_features_ee_state, 
             config.actions_per_chunk,
             config.policy_device,
+            rename_map=config.rename_map
         )
         self.channel = grpc.insecure_channel(
             self.server_address, grpc_channel_options(initial_backoff=f"{config.environment_dt:.4f}s")
@@ -149,7 +151,34 @@ class RobotClientEE:
         # Use an event for thread-safe coordination
         self.must_go = threading.Event()
         self.must_go.set()  # Initially set - observations qualify for direct processing
+       # 监听键盘输入->的时候清空action缓存
+        threading.Thread(target=self._listen_clear_key,daemon=True).start()
+        # 等待时间
+        self.pause_until=0
 
+
+    def _listen_clear_key(self):
+        def on_press(key):
+            try:
+                if key==keyboard.Key.right:
+                    self.clear_action_queue()
+                if key==keyboard.Key.left:
+                    self.running=False
+            except AttributeError:
+                self.logger.info("键盘出问题")
+        with keyboard.Listener(on_press=on_press) as listener:
+            listener.join()
+
+    def clear_action_queue(self,pause_seconds:float=3.0):
+        with self.action_queue_lock:
+            # while not self.action_queue.empty():
+                # self.action_queue.get_nowait()
+                # 直接新建队列
+                self.action_queue = Queue()
+        self.must_go.set()
+        self.logger.info("清空了actionqueue，顺便设置了mustgo，停个几秒")
+        # 要设置control_loop里面暂停
+        self.pause_until=time.time()+pause_seconds
 
     @property
     def running(self):
@@ -289,6 +318,10 @@ class RobotClientEE:
         self.logger.info("Action receiving thread starting")
 
         while self.running:
+            # 右键清空，暂停几秒
+            if time.time()<self.pause_until:
+                time.sleep(0.1)
+                continue
             try:
                 # Use StreamActions to get a stream of actions from the server
                 actions_chunk = self.stub.GetActions(services_pb2.Empty())
@@ -356,6 +389,9 @@ class RobotClientEE:
                         f"Before: {old_size} items | "
                         f"After: {new_size} items | "
                     )
+                # 只执行一次getactions
+                # 以后这里要恢复
+                break
 
             except grpc.RpcError as e:
                 self.logger.error(f"Error receiving actions: {e}")
@@ -365,13 +401,12 @@ class RobotClientEE:
         with self.action_queue_lock:
             return not self.action_queue.empty()
 
-    # def _action_tensor_to_action_dict(self, action_tensor: torch.Tensor) -> dict[str, float]:
     def _action_tensor_to_action_dict(self, action_tensor: torch.Tensor) -> dict[str, float]:
         # TODO 这里不能用self.robot.action_features，要改成ee_feature
         action = {key: action_tensor[i].item() for i, key in enumerate(self.action_features_ee)}
         return action
 
-    def control_loop_action(self, verbose: bool = False) -> dict[str, Any]:
+    def control_loop_action(self, verbose: bool = True) -> dict[str, Any]:
         """Reading and performing actions in local queue"""
 
         # Lock only for queue operations
@@ -382,15 +417,18 @@ class RobotClientEE:
             timed_action = self.action_queue.get_nowait()
         get_end = time.perf_counter() - get_start
 
-
         # _performed_action = self.robot.send_action(
         #     self._action_tensor_to_action_dict(timed_action.get_action())
         # )
         obs=self.robot.get_observation()
+        print("from server",timed_action.get_action())
         ee_action = self._action_tensor_to_action_dict(timed_action.get_action())
         joint_action = self.ee_to_follower_joints((ee_action,obs))
-        _performed_action = self.robot.send_action(joint_action)
+        print(f"ee-action={ee_action},state_joint_obs：shoulder_pan.pos={obs['shoulder_pan.pos']},shoulder_lift.pos={obs['shoulder_lift.pos']},elbow_flex.pos={obs['elbow_flex.pos']},wrist_flex.pos={obs['wrist_flex.pos']},wrist_roll.pos={obs['wrist_roll.pos']},gripper={obs['gripper.pos']},joint_action={joint_action}")
 
+        _performed_action = self.robot.send_action(joint_action)
+        # _performed_action = joint_action
+        
 
         with self.latest_action_lock:
             self.latest_action = timed_action.get_timestep()
@@ -423,6 +461,20 @@ class RobotClientEE:
 
             raw_observation: RawObservation = self.robot.get_observation()
             ee_obs = self.joints_to_ee(raw_observation) 
+                    # 额外增加state_joint
+            joint_keys = [
+                "shoulder_pan.pos",
+                "shoulder_lift.pos",
+                "elbow_flex.pos",
+                "wrist_flex.pos",
+                "wrist_roll.pos",
+                "gripper.pos",
+            ]
+
+            # 将 obs 中的关节角数据注入 obs_processed
+            for key in joint_keys:
+                if key in raw_observation:  # 确保obs中有这个值
+                    ee_obs[key] = raw_observation[key]
             # raw_observation["task"] = task
             ee_obs["task"] = task
 
@@ -449,7 +501,7 @@ class RobotClientEE:
                 # must-go event will be set again after receiving actions
                 self.must_go.clear()
 
-            if verbose:
+            if verbose :
                 # Calculate comprehensive FPS metrics
                 fps_metrics = self.fps_tracker.calculate_fps_metrics(observation.get_timestamp())
 

@@ -48,16 +48,16 @@ from lerobot.utils.control_utils import init_keyboard_listener
 from lerobot.utils.utils import log_say
 from lerobot.utils.visualization_utils import init_rerun
 
-NUM_EPISODES = 1
+NUM_EPISODES = 10
 FPS = 30
-EPISODE_TIME_SEC = 60
+EPISODE_TIME_SEC = 200
 TASK_DESCRIPTION = "pick up the yellow sponge and place it into the box."
 HF_MODEL_ID = "outputs/train/ee_action_ee_state/checkpoints/020000/pretrained_model"
-HF_DATASET_ID = "eva/test2"
+HF_DATASET_ID = "eva_fuyuan/test4"
 
 # Create the robot configuration & robot
 camera_config = {
-    "wrist": OpenCVCameraConfig(index_or_path=6, width=640, height=480, fps=FPS),
+    "wrist": OpenCVCameraConfig(index_or_path=0, width=640, height=480, fps=FPS),
     # 如果以后要加 side 摄像头可以在这里添加
     "side": RealSenseCameraConfig(serial_number_or_name="806312060427", width=640, height=480, fps=FPS, use_depth=False)
 }
@@ -72,6 +72,7 @@ robot = SO100Follower(robot_config)
 
 # Create policy
 policy = SmolVLAPolicy.from_pretrained(HF_MODEL_ID)
+# policy = SmolVLAPolicy.from_pretrained()
 
 # NOTE: It is highly recommended to use the urdf in the SO-ARM100 repo: https://github.com/TheRobotStudio/SO-ARM100/blob/main/Simulation/SO101/so101_new_calib.urdf
 kinematics_solver = RobotKinematics(
@@ -133,13 +134,15 @@ dataset = LeRobotDataset.create(
     robot_type=robot.name,
     use_videos=True,
     image_writer_threads=4,
+    # push_to_hub=False
 )
 
 # Build Policy Processors
 preprocessor, postprocessor = make_pre_post_processors(
     policy_cfg=policy,
     pretrained_path=HF_MODEL_ID,
-    dataset_stats=dataset.meta.stats,
+    # dataset_stats=dataset.meta.stats,
+    dataset_stats=None,
     # The inference device is automatically set to match the detected hardware, overriding any previous device settings from training to ensure compatibility.
     preprocessor_overrides={"device_processor": {"device": str(policy.config.device)}},
 )
@@ -149,7 +152,7 @@ robot.connect()
 
 # Initialize the keyboard listener and rerun visualization
 listener, events = init_keyboard_listener()
-init_rerun(session_name="so100_so100_evaluate")
+# init_rerun(session_name="so100_so100_evaluate")
 
 if not robot.is_connected:
     raise ValueError("Robot is not connected!")

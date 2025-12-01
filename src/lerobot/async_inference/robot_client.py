@@ -31,7 +31,9 @@ python src/lerobot/async_inference/robot_client.py \
     --debug_visualize_queue_size=True
 ```
 """
-
+from pynput import keyboard
+import numpy as np
+import cv2
 import logging
 import pickle  # nosec
 import threading
@@ -134,6 +136,34 @@ class RobotClient:
         # Use an event for thread-safe coordination
         self.must_go = threading.Event()
         self.must_go.set()  # Initially set - observations qualify for direct processing
+       # 监听键盘输入->的时候清空action缓存
+        threading.Thread(target=self._listen_clear_key,daemon=True).start()
+        # 等待时间
+        self.pause_until=0
+
+
+    def _listen_clear_key(self):
+        def on_press(key):
+            try:
+                if key==keyboard.Key.right:
+                    self.clear_action_queue()
+                if key==keyboard.Key.left:
+                    self.running=False
+            except AttributeError:
+                self.logger.info("键盘出问题")
+        with keyboard.Listener(on_press=on_press) as listener:
+            listener.join()
+
+    def clear_action_queue(self,pause_seconds:float=3.0):
+        with self.action_queue_lock:
+            # while not self.action_queue.empty():
+                # self.action_queue.get_nowait()
+                # 直接新建队列
+                self.action_queue = Queue()
+        self.must_go.set()
+        self.logger.info("清空了actionqueue，顺便设置了mustgo，停个几秒")
+        # 要设置control_loop里面暂停
+        self.pause_until=time.time()+pause_seconds
 
     @property
     def running(self):
@@ -272,6 +302,10 @@ class RobotClient:
         self.logger.info("Action receiving thread starting")
 
         while self.running:
+            # 右键清空，暂停几秒
+            if time.time()<self.pause_until:
+                time.sleep(0.1)
+                continue
             try:
                 # Use StreamActions to get a stream of actions from the server
                 actions_chunk = self.stub.GetActions(services_pb2.Empty())
@@ -396,6 +430,16 @@ class RobotClient:
 
             raw_observation: RawObservation = self.robot.get_observation()
             raw_observation["task"] = task
+            # 1. 先加载之前计算好的单应性矩阵 H
+            H = np.load("homography.npy")  # shape (3,3)
+
+            # 2. 假设你在循环里获取obs后，直接对camera1的图像做变换
+            if "side" in raw_observation:
+                img = raw_observation["side"]  # 这里 img 是 numpy array 格式
+                h, w = img.shape[:2]
+                # 将新位置图像映射到旧位置视角
+                warped_img = cv2.warpPerspective(img, H, (w, h))
+                raw_observation["side"] = warped_img  # 覆盖原来的图像
 
             with self.latest_action_lock:
                 latest_action = self.latest_action
