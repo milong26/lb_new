@@ -245,32 +245,13 @@ class SmolVLAPolicy(PreTrainedPolicy):
     def get_optim_params(self) -> dict:
         return self.parameters()
 
+    # 最终执行到这里
     def _get_action_chunk(self, batch: dict[str, Tensor], noise: Tensor | None = None) -> Tensor:
         # TODO: Check if this for loop is needed.
         # Context: In fact, self.queues contains only ACTION field, and in inference, we don't have action in the batch
         # In the case of offline inference, we have the action in the batch
         # that why without the k != ACTION check, it will raise an error because we are trying to stack
         # on an empty container.
-        # with open("batch_dump.txt", "w") as f:
-        #     f.write("=== input batch to model ===\n")
-        #     for k, v in batch.items():
-        #         if v is None:
-        #             f.write(f"{k}: None\n")
-        #         elif isinstance(v, torch.Tensor):
-        #             f.write(f"{k}: Tensor, shape={tuple(v.shape)}, dtype={v.dtype}, device={v.device}, "
-        #                     f"mean={v.float().mean().item():.6f}, std={v.float().std().item():.6f}\n")
-        #             if "image" in k:
-        #                 f.write(f"  image min={v.min().item()}, max={v.max().item()}\n")
-        #                 f.write(f"  first 10 pixels: {v.view(-1)[:10].tolist()}\n")
-        #         elif isinstance(v, (float, int)):
-        #             f.write(f"{k}: {v} ({type(v).__name__})\n")
-        #         elif isinstance(v, (list, tuple)):
-        #             f.write(f"{k}: list/tuple, length={len(v)}\n")
-        #         elif isinstance(v, dict):
-        #             f.write(f"{k}: dict, keys={list(v.keys())}\n")
-        #         else:
-        #             f.write(f"{k}: {type(v).__name__} (unsupported type for detailed printing)\n")
-
         for k in batch:
             if k in self._queues and k != ACTION:
                 batch[k] = torch.stack(list(self._queues[k]), dim=1)
@@ -287,9 +268,7 @@ class SmolVLAPolicy(PreTrainedPolicy):
         actions = actions[:, :, :original_action_dim]
         if self.config.adapt_to_pi_aloha:
             actions = self._pi_aloha_encode_actions(actions)
-        # torch.save(actions, "fixed_actions.pt")
-        # print("输出的action",actions)
-        # actions = torch.load("fixed_actions_fuwuqi.pt",map_location=torch.device('cpu'))
+
         return actions
 
     def _prepare_batch(self, batch: dict[str, Tensor]) -> dict[str, Tensor]:

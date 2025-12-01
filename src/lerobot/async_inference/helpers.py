@@ -36,7 +36,7 @@ from lerobot.policies import (  # noqa: F401
 from lerobot.robots.robot import Robot
 from lerobot.utils.constants import OBS_IMAGES, OBS_STATE, OBS_STR
 from lerobot.utils.utils import init_logging
-
+import numpy as np
 Action = torch.Tensor
 
 # observation as received from the robot
@@ -70,19 +70,39 @@ def is_image_key(k: str) -> bool:
     return k.startswith(OBS_IMAGES)
 
 
-def resize_robot_observation_image(image: torch.tensor, resize_dims: tuple[int, int, int]) -> torch.tensor:
+# def resize_robot_observation_image(image: torch.tensor, resize_dims: tuple[int, int, int]) -> torch.tensor:
+#     assert image.ndim == 3, f"Image must be (C, H, W)! Received {image.shape}"
+#     # (H, W, C) -> (C, H, W) for resizing from robot obsevation resolution to policy image resolution
+#     # 暂时去掉
+#     image = image.permute(2, 0, 1)
+#     # dims = (resize_dims[1], resize_dims[2])注释掉了
+#     # dims = (resize_dims[1], resize_dims[2])
+#     # Add batch dimension for interpolate: (C, H, W) -> (1, C, H, W)
+#     # image_batched = image.unsqueeze(0)
+#     # Interpolate and remove batch dimension: (1, C, H, W) -> (C, H, W)
+#     # resized = torch.nn.functional.interpolate(image_batched, size=dims, mode="bilinear", align_corners=False)
+#     # return image_batched.squeeze(0)
+#     return image
+
+#     # return resized.squeeze(0)
+
+def resize_robot_observation_image(image: torch.tensor) -> torch.tensor:
+# def resize_robot_observation_image(image: torch.tensor, resize_dims: tuple[int, int, int]) -> torch.tensor:
     assert image.ndim == 3, f"Image must be (C, H, W)! Received {image.shape}"
     # (H, W, C) -> (C, H, W) for resizing from robot obsevation resolution to policy image resolution
     image = image.permute(2, 0, 1)
-    dims = (resize_dims[1], resize_dims[2])
-    # Add batch dimension for interpolate: (C, H, W) -> (1, C, H, W)
-    image_batched = image.unsqueeze(0)
-    # Interpolate and remove batch dimension: (1, C, H, W) -> (C, H, W)
-    resized = torch.nn.functional.interpolate(image_batched, size=dims, mode="bilinear", align_corners=False)
+    # dims = (resize_dims[1], resize_dims[2])
+    # # Add batch dimension for interpolate: (C, H, W) -> (1, C, H, W)
+    # image_batched = image.unsqueeze(0)
+    # # Interpolate and remove batch dimension: (1, C, H, W) -> (C, H, W)
+    # resized = torch.nn.functional.interpolate(image_batched, size=dims, mode="bilinear", align_corners=False)
 
-    return resized.squeeze(0)
+    # return resized.squeeze(0)
+    return image
 
 
+
+# 最终我还是选择在原来代码的基础上修改
 # TODO(Steven): Consider implementing a pipeline step for this
 def raw_observation_to_observation(
     raw_observation: RawObservation,
@@ -149,7 +169,6 @@ def prepare_raw_observation(
     # 1. {motor.pos1:value1, motor.pos2:value2, ..., laptop:np.ndarray} ->
     # -> {observation.state:[value1,value2,...], observation.images.laptop:np.ndarray}
     lerobot_obs = make_lerobot_observation(robot_obs, lerobot_features)
-
     # 2. Greps all observation.images.<> keys
     image_keys = list(filter(is_image_key, lerobot_obs))
     # state's shape is expected as (B, state_dim)
@@ -161,7 +180,9 @@ def prepare_raw_observation(
     # Turns the image features to (C, H, W) with H, W matching the policy image features.
     # This reduces the resolution of the images
     image_dict = {
-        key: resize_robot_observation_image(torch.tensor(lerobot_obs[key]), policy_image_features[key].shape)
+        # 之前的代码需要在这里reshape
+        # key: resize_robot_observation_image(torch.tensor(lerobot_obs[key]), policy_image_features[key].shape)
+        key: resize_robot_observation_image(torch.tensor(lerobot_obs[key]))
         for key in image_keys
     }
 
