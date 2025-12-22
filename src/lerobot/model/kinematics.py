@@ -39,7 +39,7 @@ class RobotKinematics:
                 "placo is required for RobotKinematics. "
                 "Please install the optional dependencies of `kinematics` in the package."
             ) from e
-
+        # 参考https://placo.readthedocs.io/en/latest/kinematics/getting_started.html这篇，kinematic开始
         self.robot = placo.RobotWrapper(urdf_path)
         self.solver = placo.KinematicsSolver(self.robot)
         self.solver.mask_fbase(True)  # Fix the base
@@ -118,11 +118,15 @@ class RobotKinematics:
         self.tip_frame.T_world_frame = desired_ee_pose
 
         # Configure the task based on position_only flag
+        # 按照这个教程effector_task.configure("effector", "soft", 1.0, 1.0)为什么不放在init里面
+        # soft意味着任务不是硬约束的（求解器将尽最大努力达到所需的姿势，但如果无法达到，则不会失败）
+        # 为什么orientation_weight变成默认0.01了？
         # self.tip_frame.configure(self.target_frame_name, "soft", position_weight, orientation_weight)
         # 修改方案3，scaled
         self.tip_frame.configure(self.target_frame_name, "soft", position_weight, orientation_weight)
 
         # Solve IK
+        # true的设定表示希望通过积分来反映机器人状态中的解决方案
         self.solver.solve(True)
         self.robot.update_kinematics()
 
