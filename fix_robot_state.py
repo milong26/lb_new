@@ -14,6 +14,8 @@ robot_config = SO100FollowerConfig(
 
 robot = SO100Follower(robot_config)
 robot.connect()
+print(robot.is_calibrated)
+print(robot.calibrate)
 
 if not robot.is_connected:
     raise ValueError("Robot is not connected!")
@@ -29,17 +31,17 @@ joint_names = [
 ]
 
 # --- 固定目标关节值 ---
+# --- 达成目标状态 ---
 target_action = {
-    "shoulder_pan.pos": -10.066,
-    "shoulder_lift.pos": -91.433,
-    "elbow_flex.pos": 100.533,
-    "wrist_flex.pos": 38.086,
-    "wrist_roll.pos": -7.041,
-    "gripper.pos": 4.487
-}
-
+                "shoulder_pan.pos": -10.417582417582418,
+                "shoulder_lift.pos": -89.8021978021978,
+                "elbow_flex.pos": 95.47252747252747,
+                "wrist_flex.pos": 37.67032967032967,
+                "wrist_roll.pos": 0.7472527472527473,
+                "gripper.pos": 8.651597817614965
+            }
 # --- 循环发送直到到位 ---
-tolerance = 0.01  # 允许误差 0.05 度
+tolerance = 0.001  # 允许误差 0.05 度
 try:
     print("开始移动到目标关节值...")
     while True:
@@ -60,7 +62,7 @@ try:
         robot.send_action(target_action)
 
         # 短暂停留，避免过快循环
-        time.sleep(0.05)
+        time.sleep(0.3)
 
 except KeyboardInterrupt:
     print("程序被用户中断")

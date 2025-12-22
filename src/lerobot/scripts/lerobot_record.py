@@ -109,6 +109,7 @@ from lerobot.teleoperators import (  # noqa: F401
     so100_leader,
     so101_leader,
 )
+import numpy as np
 from lerobot.teleoperators.keyboard.teleop_keyboard import KeyboardTeleop
 from lerobot.utils.constants import ACTION, OBS_STR
 from lerobot.utils.control_utils import (
@@ -126,7 +127,35 @@ from lerobot.utils.utils import (
     log_say,
 )
 from lerobot.utils.visualization_utils import init_rerun, log_rerun_data
+import cv2
 
+import json
+
+# 保存动作数据的文件路径
+action_file_path = "robot_actions.json"
+
+# 假设 robot_action_to_send 是一个 dict，比如：
+# {"shoulder_pan.pos": 0.1, "shoulder_lift.pos": 0.2, ...}
+
+# 如果你希望保存多个动作，按顺序追加
+def save_action_to_file(action_dict: dict, file_path: str = action_file_path):
+    try:
+        # 读取已有的动作列表
+        try:
+            with open(file_path, "r") as f:
+                actions_list = json.load(f)
+        except FileNotFoundError:
+            actions_list = []
+
+        # 添加新动作
+        actions_list.append(action_dict)
+
+        # 保存回文件
+        with open(file_path, "w") as f:
+            json.dump(actions_list, f, indent=2)
+
+    except Exception as e:
+        print(f"Error saving action: {e}")
 
 @dataclass
 class DatasetRecordConfig:
@@ -232,9 +261,34 @@ class RecordConfig:
                                V
                   ( Rerun Log / Loop Wait )
 """
-import numpy as np
-import cv2
 
+
+import matplotlib.pyplot as plt
+
+def plot_recorded_actions( actions, joint_states):
+    if not actions:  # 防止为空
+        print("No actions recorded.")
+        return
+
+    keys = list(actions[0].keys())
+    n = len(keys)
+    fig, axes = plt.subplots(n, 1, figsize=(12, 3*n), sharex=True)
+    x = list(range(len(actions)))
+
+    for i, key in enumerate(keys):
+        ax = axes[i]
+        y_action = [a[key] for a in actions]
+        y_joint = [s[key] for s in joint_states]
+        ax.plot(x, y_action, label='performed_action')
+        ax.plot(x, y_joint, label='joint_state', linestyle='--')
+        ax.set_ylabel(key)
+        ax.legend()
+
+    plt.xlabel('Time (s)')
+    plt.show(block=True)
+
+
+firsttime=False
 @safe_stop_image_writer
 def record_loop(
     robot: Robot,
@@ -258,6 +312,14 @@ def record_loop(
     single_task: str | None = None,
     display_data: bool = False,
 ):
+    
+
+    # 用于记录时间戳、动作和关节状态
+    logged_timestamps: list[float] = []
+    logged_actions: list[dict[str, float]] = []
+    logged_joint_states: list[dict[str, float]] = []
+
+
     if dataset is not None and dataset.fps != fps:
         raise ValueError(f"The dataset fps should be equal to requested fps ({dataset.fps} != {fps}).")
 
@@ -334,6 +396,8 @@ def record_loop(
         ]
 
         # 将 obs 中的关节角数据注入 obs_processed
+        # 只是为了保存，不加也没啥问题？
+        # TODO
         for key in joint_keys:
             if key in obs:  # 确保obs中有这个值
                 obs_processed[key] = obs[key]
@@ -381,7 +445,22 @@ def record_loop(
             continue
 
         # Applies a pipeline to the action, default is IdentityProcessor
-        obs=robot.get_observation()
+        global firsttime
+        if not firsttime:
+            obs= {
+                "shoulder_pan.pos": -10.417582417582418,
+                "shoulder_lift.pos": -89.8021978021978,
+                "elbow_flex.pos": 95.47252747252747,
+                "wrist_flex.pos": 37.67032967032967,
+                "wrist_roll.pos": 0.7472527472527473,
+                "gripper.pos": 8.651597817614965
+            }
+            # print("初始的state是？",obs)
+            firsttime=True
+        else:
+            obs=robot.get_only_state_obs()
+        # print("获得obs的时间",time.perf_counter())
+
         if policy is not None and act_processed_policy is not None:
             action_values = act_processed_policy
             robot_action_to_send = robot_action_processor((act_processed_policy, obs))
@@ -392,30 +471,40 @@ def record_loop(
         # Send action to robot
         # Action can eventually be clipped using `max_relative_target`,
         # so action actually sent is saved in the dataset. action = postprocessor.process(action)
+        # print("手动修改",robot_action_to_send)
         # TODO(steven, pepijn, adil): we should use a pipeline step to clip the action, so the sent action is the action that we input to the robot.
-        print(f"ee-action是{act_processed_policy},观察的obs：shoulder_pan.pos={obs['shoulder_pan.pos']},shoulder_lift.pos={obs['shoulder_lift.pos']},elbow_flex.pos={obs['elbow_flex.pos']},wrist_flex.pos={obs['wrist_flex.pos']},wrist_roll.pos={obs['wrist_roll.pos']},gripper={obs['gripper.pos']},当前的joint_action{robot_action_to_send}")
+        # print(f"ee-action={act_processed_policy},观察的obs:shoulder_pan.pos={obs['shoulder_pan.pos']},shoulder_lift.pos={obs['shoulder_lift.pos']},elbow_flex.pos={obs['elbow_flex.pos']},wrist_flex.pos={obs['wrist_flex.pos']},wrist_roll.pos={obs['wrist_roll.pos']},gripper={obs['gripper.pos']},当前的joint_action{robot_action_to_send}")
+        print("ee-x是",act_processed_policy["ee.x"],"当前state是",obs["shoulder_pan.pos"],"要求的action",robot_action_to_send["shoulder_pan.pos"])
         _sent_action = robot.send_action(robot_action_to_send)
+        logged_joint_states.append(obs)
+        logged_actions.append(_sent_action) 
+        save_action_to_file(robot_action_to_send)
+        # print("发送的时间是",time.perf_counter())
         
         # 新增 state_joint
         # Write to dataset
-        if dataset is not None:
-            # action_joint_frame = build_dataset_frame(
-            #     dataset.features, 
-            #     act_not_processed_teleop,                  # teleop 原始 joints
-            #     prefix="joint_action" # 因为utils里面这么写的if key in DEFAULT_FEATURES or not key.startswith(prefix):，所以不能用action_joint
-            # )
-            action_frame = build_dataset_frame(dataset.features, action_values, prefix=ACTION)
-            # frame = {**observation_frame,**action_joint_frame, **action_frame, "task": single_task}
-            frame = {**observation_frame, **action_frame, "task": single_task}
-            dataset.add_frame(frame)
+        # if dataset is not None:
+        #     # action_joint_frame = build_dataset_frame(
+        #     #     dataset.features, 
+        #     #     act_not_processed_teleop,                  # teleop 原始 joints
+        #     #     prefix="joint_action" # 因为utils里面这么写的if key in DEFAULT_FEATURES or not key.startswith(prefix):，所以不能用action_joint
+        #     # )
+        #     action_frame = build_dataset_frame(dataset.features, action_values, prefix=ACTION)
+        #     # frame = {**observation_frame,**action_joint_frame, **action_frame, "task": single_task}
+        #     frame = {**observation_frame, **action_frame, "task": single_task}
+        #     dataset.add_frame(frame)
 
-        if display_data:
-            log_rerun_data(observation=obs_processed, action=action_values)
+        # if display_data:
+        #     log_rerun_data(observation=obs_processed, action=action_values)
 
         dt_s = time.perf_counter() - start_loop_t
+        # busy_wait(1 / fps - dt_s)
         busy_wait(1 / fps - dt_s)
+        print("等了",0.03 - dt_s,robot.get_only_state_obs())
 
         timestamp = time.perf_counter() - start_episode_t
+    plot_recorded_actions(logged_actions, logged_joint_states)
+
 
 
 @parser.wrap()

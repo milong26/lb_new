@@ -1,7 +1,13 @@
 
-from pynput import keyboard
-import numpy as np
-import cv2
+
+"""
+为了ee推理修改代码：
+传送ee_state给server，以后可以选joint？
+接收ee_Action转换成joint然后发给robot
+不能直接按照file运行，要用module：python -m lerobot.async_inference.robot_client_ee
+"""
+
+
 import logging
 import pickle  # nosec
 import threading
@@ -14,6 +20,13 @@ from typing import Any
 
 import draccus
 import grpc
+from lerobot.datasets.pipeline_features import aggregate_pipeline_dataset_features, create_initial_features
+from lerobot.model.kinematics import RobotKinematics
+from lerobot.processor.core import RobotAction, RobotObservation
+from lerobot.processor.pipeline import RobotProcessorPipeline
+from lerobot.robots.so100_follower.robot_kinematic_processor import EEBoundsAndSafety, ForwardKinematicsJointsToEE, InverseKinematicsEEToJoints
+from pynput import keyboard
+from lerobot.utils.robot_utils import busy_wait
 import torch
 
 from lerobot.cameras.opencv.configuration_opencv import OpenCVCameraConfig  # noqa: F401
@@ -48,18 +61,17 @@ from .helpers import (
     visualize_action_queue_size,
 )
 
-# 运动学相关
+from lerobot.datasets.pipeline_features import aggregate_pipeline_dataset_features, create_initial_features
+from lerobot.datasets.utils import combine_feature_dicts
 from lerobot.model.kinematics import RobotKinematics
+# from lerobot.policies.act.modeling_act import ACTPolicy
+from lerobot.policies.factory import make_pre_post_processors
+from lerobot.policies.smolvla.modeling_smolvla import SmolVLAPolicy
 from lerobot.processor import (
     RobotAction,
     RobotObservation,
     RobotProcessorPipeline,
     make_default_teleop_action_processor,
-)
-from lerobot.robots.so100_follower.robot_kinematic_processor import (
-    EEBoundsAndSafety,
-    ForwardKinematicsJointsToEE,
-    InverseKinematicsEEToJoints,
 )
 from lerobot.processor.converters import (
     observation_to_transition,
@@ -67,82 +79,13 @@ from lerobot.processor.converters import (
     transition_to_observation,
     transition_to_robot_action,
 )
-# feature相关
-from lerobot.datasets.pipeline_features import aggregate_pipeline_dataset_features,create_initial_features
-from lerobot.configs.types import FeatureType, PolicyFeature
-from lerobot.policies.utils import make_robot_action
-
-# 重新搞，不能用pipeline
-from lerobot.robots.so100_follower.robot_kinematic_processor import compute_forward_kinematics_joints_to_ee
-
-import json
-
-from scipy.spatial.transform import Rotation
+from lerobot.robots.so100_follower.robot_kinematic_processor import (
+    EEBoundsAndSafety,
+    ForwardKinematicsJointsToEE,
+    InverseKinematicsEEToJoints,
+)
 import numpy as np
-
-def compute_robot_joints_from_ee(
-    action: dict,
-    observation: dict,
-    kinematics_solver,
-    motor_names,
-    q_curr=None,
-    initial_guess_current_joints=True,
-    ee_bounds=None,
-    max_ee_step_m=0.10
-):
-    """
-    将 end-effector 指令转为关节位置（仿照 pipeline 的功能）。
-    
-    Args:
-        action: dict, 包含 'ee.x', 'ee.y', 'ee.z', 'ee.wx', 'ee.wy', 'ee.wz', 'ee.gripper_pos'
-        observation: dict, 当前关节状态
-        kinematics_solver: RobotKinematics 对象
-        motor_names: list, 机器人关节名称
-        q_curr: np.ndarray, 上一次关节位置（可选）
-        initial_guess_current_joints: bool, 是否使用当前关节作为 IK 初值
-        ee_bounds: dict, {"min": [...], "max": [...]}, end-effector 坐标限制
-        max_ee_step_m: float, 最大允许位移
-    Returns:
-        dict: 处理后的关节指令
-        np.ndarray: 更新后的 q_curr
-    """
-
-    # --- 1. EEBoundsAndSafety ---
-    x, y, z = action['ee.x'], action['ee.y'], action['ee.z']
-    if ee_bounds:
-        for i, coord in enumerate([x, y, z]):
-            if coord < ee_bounds["min"][i] or coord > ee_bounds["max"][i]:
-                raise ValueError(f"EE target {coord} exceeds bounds {ee_bounds}")
-    
-    # 可选: 检查最大步长 (这里简化, 可按需要实现)
-    
-    # --- 2. 准备当前关节状态 ---
-    q_raw = np.array([float(v) for k, v in observation.items() if k.endswith(".pos")], dtype=float)
-    if initial_guess_current_joints or q_curr is None:
-        q_curr = q_raw
-
-    # --- 3. 构建目标位姿 ---
-    wx, wy, wz = action['ee.wx'], action['ee.wy'], action['ee.wz']
-    gripper_pos = action['ee.gripper_pos']
-
-    t_des = np.eye(4)
-    t_des[:3, :3] = Rotation.from_rotvec([wx, wy, wz]).as_matrix()
-    t_des[:3, 3] = [x, y, z]
-
-    # --- 4. 计算 IK ---
-    q_target = kinematics_solver.inverse_kinematics(q_curr, t_des)
-    q_curr = q_target  # 更新状态
-
-    # --- 5. 填充关节指令 ---
-    joint_action = {}
-    for i, name in enumerate(motor_names):
-        if name != "gripper":
-            joint_action[f"{name}.pos"] = float(q_target[i])
-        else:
-            joint_action["gripper.pos"] = float(gripper_pos)
-
-    return joint_action, q_curr
-firsttime=True
+import cv2
 class RobotClientEE:
     prefix = "robot_client_ee"
     logger = get_logger(prefix)
@@ -151,24 +94,30 @@ class RobotClientEE:
         # Store configuration
         self.config = config
         self.robot = make_robot_from_config(config.robot)
-        self.robot.connect()
 
-        # 运动学相关
-        # 1. 求解器
-        self.kinematics_solver = RobotKinematics(
+        # joint->ee的数据处理，solver+ee->joint+joint->ee
+        self.robot_kinematics_solver = RobotKinematics(
             urdf_path="SO-ARM100/Simulation/SO101/so101_new_calib.urdf",
             target_frame_name="gripper_frame_link",
             joint_names=list(self.robot.bus.motors.keys()),
         )
-        # 2.逆向的计算
-        self.robot_ee_to_joints_processor = RobotProcessorPipeline[tuple[RobotAction, RobotObservation], RobotAction](
+        self.joints_to_ee = RobotProcessorPipeline[RobotObservation, RobotObservation](
+            steps=[
+                ForwardKinematicsJointsToEE(
+                    kinematics=self.robot_kinematics_solver,
+                    motor_names=list(self.robot.bus.motors.keys())
+                ),],
+            to_transition=observation_to_transition,
+            to_output=transition_to_observation,
+        )
+        self.ee_to_follower_joints = RobotProcessorPipeline[tuple[RobotAction, RobotObservation], RobotAction](
             [
                 EEBoundsAndSafety(
                     end_effector_bounds={"min": [-1.0, -1.0, -1.0], "max": [1.0, 1.0, 1.0]},
                     max_ee_step_m=0.10,
                 ),
                 InverseKinematicsEEToJoints(
-                    kinematics=self.kinematics_solver,
+                    kinematics=self.robot_kinematics_solver,
                     motor_names=list(self.robot.bus.motors.keys()),
                     initial_guess_current_joints=True,
                 ),
@@ -176,69 +125,23 @@ class RobotClientEE:
             to_transition=robot_action_observation_to_transition,
             to_output=transition_to_robot_action,
         )
-        # 3. 正向运算
-        self.robot_joints_to_ee_pose_processor = RobotProcessorPipeline[RobotObservation, RobotObservation](
-            steps=[
-                ForwardKinematicsJointsToEE(kinematics=self.kinematics_solver, motor_names=list(self.robot.bus.motors.keys()))
-            ],
-            to_transition=observation_to_transition,
-            to_output=transition_to_observation,
-        )
-        # 新增ee_feature
-        self.all_feature=aggregate_pipeline_dataset_features(
-            pipeline=self.robot_joints_to_ee_pose_processor,
+        self.robot.connect()
+        lerobot_features = map_robot_keys_to_lerobot_features(self.robot)
+        ee_feature=aggregate_pipeline_dataset_features(
+            pipeline=self.joints_to_ee,
             initial_features=create_initial_features(observation=self.robot.observation_features),
             use_videos=True,
-            # TODO true?
-        ),
-        # User for now should be explicit on the feature keys that were used for record
-        # Alternatively, the user can pass the processor step that has the right features
-        self.action_feature=aggregate_pipeline_dataset_features(
-            pipeline=make_default_teleop_action_processor(),
-            initial_features=create_initial_features(
-                action={
-                    f"ee.{k}": PolicyFeature(type=FeatureType.ACTION, shape=(1,))
-                    for k in ["x", "y", "z", "wx", "wy", "wz", "gripper_pos"]
-                }
-            ),
-            use_videos=True,
-        ),
-
-        # 原来的feature：生成 LeRobot dataset 的特征字典，规则非常固定
-        # lerobot_features = map_robot_keys_to_lerobot_features(self.robot)
-        # 原来feature
-        # 'observation.state': {'dtype': 'float32', 'shape': (6,), 'names': ['shoulder_pan.pos', 'shoulder_lift.pos', 'elbow_flex.pos', 'wrist_flex.pos', 'wrist_roll.pos', 'gripper.pos']}, 
-        # 'observation.images.wrist': {'dtype': 'image', 'shape': (480, 640, 3), 'names': ['height', 'width', 'channels']},
-        # 'observation.images.side': {'dtype': 'image', 'shape': (480, 640, 3), 'names': ['height', 'width', 'channels']}}
-        # 重新整理policy feature，参考evaluate的feature
-        # 没有action的要求？
-        # print("旧的",lerobot_features)
-        # self.state_feature[0].pop('action', None)
-        # print("新的",self.state_feature[0])
-        state_only = {k: v for k, v in self.all_feature[0].items() if k != 'action'}
-        lerobot_features=state_only
-        # 为什么dtype变成了video....
-        # {'observation.state': {'dtype': 'float32', 'shape': (7,), 'names': ['ee.x', 'ee.y', 'ee.z', 'ee.wx', 'ee.wy', 'ee.wz', 'ee.gripper_pos']},
-        # 'observation.images.wrist': {'dtype': 'video', 'shape': (480, 640, 3), 'names': ['height', 'width', 'channels']}, 
-        # 'observation.images.side': {'dtype': 'video', 'shape': (480, 640, 3), 'names': ['height', 'width', 'channels']}}
-
-        
-        self.q_curr=np.array(
-            [
-                self.robot.get_only_state_obs()[f"{name}.pos"]
-                for name in self.robot.bus.motors.keys()
-            ],
-            dtype=float,
         )
-        
-        
+        lerobot_features_ee_state=lerobot_features.copy()
+        lerobot_features_ee_state['observation.state']=ee_feature['observation.state']
+        self.action_features_ee= {name: float for name in ee_feature['action']['names']}
         # Use environment variable if server_address is not provided in config
         self.server_address = config.server_address
-        # 检验这个policy_config是否正确
+
         self.policy_config = RemotePolicyConfig(
             config.policy_type,
             config.pretrained_name_or_path,
-            lerobot_features,
+            lerobot_features_ee_state, 
             config.actions_per_chunk,
             config.policy_device,
             rename_map=config.rename_map
@@ -275,23 +178,7 @@ class RobotClientEE:
         threading.Thread(target=self._listen_clear_key,daemon=True).start()
         # 等待时间
         self.pause_until=0
-        # 为了记录state和action增加的
-        self.logged_timestamps = []
-        self.logged_actions = []  # list of dicts
-        self.logged_joint_states = []  # list of dicts
-
-
-        actions_path = "robot_actions.json"
-        with open(actions_path, "r") as f:
-            self.preloaded_actions: list[dict[str, float]] = json.load(f)
-
-        if len(self.preloaded_actions) == 0:
-            raise ValueError("robot_actions.json is empty!")
-        self.preloaded_action_idx: int = 0
-        self.logger.info(
-            f"Loaded {len(self.preloaded_actions)} pre-recorded robot actions"
-        )
-
+        self.firsttime=True
 
 
     def _listen_clear_key(self):
@@ -303,12 +190,8 @@ class RobotClientEE:
                     self.running=False
             except AttributeError:
                 self.logger.info("键盘出问题")
-        # with keyboard.Listener(on_press=on_press) as listener:
-        #     listener.join()
-        listener = keyboard.Listener(on_press=on_press)
-        listener.start()
-        self.shutdown_event.wait()
-        listener.stop()
+        with keyboard.Listener(on_press=on_press) as listener:
+            listener.join()
 
     def clear_action_queue(self,pause_seconds:float=3.0):
         with self.action_queue_lock:
@@ -353,16 +236,12 @@ class RobotClientEE:
 
         except grpc.RpcError as e:
             self.logger.error(f"Failed to connect to policy server: {e}")
+            self.robot.disconnect()
             return False
 
     def stop(self):
         """Stop the robot client"""
         self.shutdown_event.set()
-        try:
-            self.start_barrier.abort()
-        except:
-            pass
-
 
         self.robot.disconnect()
         self.logger.debug("Robot disconnected")
@@ -477,6 +356,7 @@ class RobotClientEE:
 
                 # Deserialize bytes back into list[TimedAction]
                 deserialize_start = time.perf_counter()
+                # 这里会出现一个bug见github.com/huggingface/lerobot/issues/2244，可以在policy_server那里修改
                 timed_actions = pickle.loads(actions_chunk.data)  # nosec
                 deserialize_time = time.perf_counter() - deserialize_start
 
@@ -533,6 +413,9 @@ class RobotClientEE:
                         f"Before: {old_size} items | "
                         f"After: {new_size} items | "
                     )
+                # 只执行一次getactions
+                # 以后这里要恢复
+                # break
 
             except grpc.RpcError as e:
                 self.logger.error(f"Error receiving actions: {e}")
@@ -543,65 +426,11 @@ class RobotClientEE:
             return not self.action_queue.empty()
 
     def _action_tensor_to_action_dict(self, action_tensor: torch.Tensor) -> dict[str, float]:
-        action = {key: action_tensor[i].item() for i, key in enumerate(self.robot.action_features)}
-        return action
-    
-    def _action_tensor_to_action_dict_ee(self, action_tensor: torch.Tensor) -> dict[str, float]:
-        action = {key: action_tensor[i].item() for i, key in enumerate(self.robot.action_features)}
+        # TODO 这里不能用self.robot.action_features，要改成ee_feature
+        action = {key: action_tensor[i].item() for i, key in enumerate(self.action_features_ee)}
         return action
 
-
-
-    def transfer_cam_to_base(policy_action, T_base_to_cam):
-        """
-        将 policy 推理得到的【相机坐标系下的绝对末端位姿】
-        转换为【机械臂 base 坐标系下的绝对末端位姿】
-
-        参数
-        ----
-        policy_action : dict
-            policy 输出的 action，必须包含：
-            policy_action["pose"] = [x, y, z, qx, qy, qz, qw]  (camera frame)
-
-        T_base_to_cam : np.ndarray (4,4)
-            相机外参：base -> camera
-
-        返回
-        ----
-        base_policy_action : dict
-            与 policy_action 结构一致，但 pose 已转换到 base 坐标系
-        """
-
-        # -------- sanity check --------
-        assert "pose" in policy_action, "policy_action must contain 'pose'"
-        pose_cam = np.asarray(policy_action["pose"])
-        assert pose_cam.shape[0] == 7, "pose must be [x,y,z,qx,qy,qz,qw]"
-
-        # -------- cam pose -> T --------
-        T_cam_to_ee = np.eye(4)
-        T_cam_to_ee[:3, 3] = pose_cam[:3]
-        T_cam_to_ee[:3, :3] = R.from_quat(pose_cam[3:7]).as_matrix()
-
-        # -------- base <- cam --------
-        T_cam_to_base = np.linalg.inv(T_base_to_cam)
-        T_base_to_ee = T_cam_to_base @ T_cam_to_ee
-
-        # -------- T -> pose --------
-        pose_base = np.zeros(7)
-        pose_base[:3] = T_base_to_ee[:3, 3]
-        pose_base[3:7] = R.from_matrix(T_base_to_ee[:3, :3]).as_quat()
-
-        # -------- copy action --------
-        base_policy_action = dict(policy_action)   # shallow copy is enough
-        base_policy_action["pose"] = pose_base
-
-        return base_policy_action
-
-
-    def control_loop_action(self, verbose: bool = False) -> dict[str, Any]:
-        if not self.running:
-            return None
-
+    def control_loop_action(self, verbose: bool = True) -> dict[str, Any]:
         """Reading and performing actions in local queue"""
 
         # Lock only for queue operations
@@ -611,75 +440,43 @@ class RobotClientEE:
             # Get action from queue
             timed_action = self.action_queue.get_nowait()
         get_end = time.perf_counter() - get_start
-        # 难道是这里的get_observation执行次数太多了？
-        
-        policy_action=timed_action.get_action()
-        # 调用相机处理
-        # base_policy_action=self.transfer_cam_to_base(policy_action)
-        # policy_action(tensor->dict)
-        act_processed_policy: RobotAction = make_robot_action(policy_action, self.action_feature[0])
-        # act_processed_policy=self._action_tensor_to_action_dict(policy_action)
-        # eeaction->joint_action
 
-        global firsttime
-        if not firsttime:
-            joint_state= {
-                "shoulder_pan.pos": -10.417582417582418,
-                "shoulder_lift.pos": -89.8021978021978,
-                "elbow_flex.pos": 95.47252747252747,
-                "wrist_flex.pos": 37.67032967032967,
-                "wrist_roll.pos": 0.7472527472527473,
-                "gripper.pos": 8.651597817614965
-            }
-            # print("初始的state是？",joint_state)
-            firsttime=True
-        else:
-            # joint_state=self.robot.get_only_state_obs()
-            joint_state=self.robot.get_only_state_obs()
-        # print("得到的joint_state是",joint_state)
-        """
-        自己写,不用pipeline
-        """
-        # 为什么算出来又不一样了???
-        # robot_action_to_send = self.robot_ee_to_joints_processor((act_processed_policy, joint_state))
-        robot_action_to_send, self.q_curr = compute_robot_joints_from_ee(
-            action=act_processed_policy,
-            observation=joint_state,
-            kinematics_solver=self.kinematics_solver,
-            motor_names=list(self.robot.bus.motors.keys()),
-            q_curr=self.q_curr,
-            # q_curr=None,
-            initial_guess_current_joints=False,
-            # initial_guess_current_joints=True,
-            ee_bounds={"min": [-1, -1, -1], "max": [1, 1, 1]},
-            max_ee_step_m=0.10,
-        )
+        # _performed_action = self.robot.send_action(
+        #     self._action_tensor_to_action_dict(timed_action.get_action())
+        # )
+        # print("from server",timed_action.get_action())
+        ee_action = self._action_tensor_to_action_dict(timed_action.get_action())
         
+        # if self.firsttime:
+        #     obs= {
+        #             "shoulder_pan.pos": -10.417582417582418,
+        #             "shoulder_lift.pos": -89.8021978021978,
+        #             "elbow_flex.pos": 95.47252747252747,
+        #             "wrist_flex.pos": 37.67032967032967,
+        #             "wrist_roll.pos": 0.7472527472527473,
+        #             "gripper.pos": 8.651597817614965
+        #         }
+        #     self.firsttime=False
+        # else:
+        obs=self.robot.get_observation()
+        # print(f"获取obs的时间",time.perf_counter())
+        joint_action = self.ee_to_follower_joints((ee_action,obs))
+        # joint_action={
+        #     "shoulder_pan.pos": -10.76923076923077,
+        #     "shoulder_lift.pos": -90.41758241758242,
+        #     "elbow_flex.pos": 94.5934065934066,
+        #     "wrist_flex.pos": 37.75824175824176,
+        #     "wrist_roll.pos": 1.098901098901099,
+        #     "gripper.pos": 9.041309431021045
+        # }
+        # print(f"ee-action={ee_action},state_joint_obs：shoulder_pan.pos={obs['shoulder_pan.pos']},shoulder_lift.pos={obs['shoulder_lift.pos']},elbow_flex.pos={obs['elbow_flex.pos']},wrist_flex.pos={obs['wrist_flex.pos']},wrist_roll.pos={obs['wrist_roll.pos']},gripper={obs['gripper.pos']},joint_action={joint_action}")
+        _performed_action = self.robot.send_action(joint_action)
+        # print(f"发送之后的时间",time.perf_counter())
+        # time.sleep(0.3)
 
-
-        # print("解算出来的",robot_action_to_send)
-        # robot_action_to_send={
-        #         "shoulder_pan.pos": -10.417582417582418,
-        #         "shoulder_lift.pos": -89.8021978021978,
-        #         "elbow_flex.pos": 95.47252747252747,
-        #         "wrist_flex.pos": 37.67032967032967,
-        #         "wrist_roll.pos": 0.7472527472527473,
-        #         "gripper.pos": 8.651597817614965
-        #     }
-        # if self.preloaded_action_idx >= len(self.preloaded_actions):
-        #     self.logger.info("All preloaded actions executed, stopping client.")
-        #     # self.shutdown_event.set()
-        #     raise KeyboardInterrupt("tingxia")
-        #     return None
-        # robot_action_to_send = self.preloaded_actions[self.preloaded_action_idx]
-        # self.preloaded_action_idx += 1
-        # print("ee-x是",act_processed_policy["ee.x"],"当前state是",joint_state["shoulder_pan.pos"],"要求的action",robot_action_to_send["shoulder_pan.pos"])
-        
-        _performed_action = self.robot.send_action(
-            robot_action_to_send
-        )
         with self.latest_action_lock:
             self.latest_action = timed_action.get_timestep()
+
         if verbose:
             with self.action_queue_lock:
                 current_queue_size = self.action_queue.qsize()
@@ -693,11 +490,6 @@ class RobotClientEE:
             self.logger.debug(
                 f"Popping action from queue to perform took {get_end:.6f}s | Queue size: {current_queue_size}"
             )
-        # timestamp = time.time()
-        # self.logged_timestamps.append(timestamp)
-        self.logged_actions.append(_performed_action)  # joint_action 是 dict
-        self.logged_joint_states.append(joint_state)  # joint_state 是 dict
-        # print("return之前",self.robot.get_only_state_obs()["shoulder_pan.pos"])
 
         return _performed_action
 
@@ -706,57 +498,46 @@ class RobotClientEE:
         with self.action_queue_lock:
             return self.action_queue.qsize() / self.action_chunk_size <= self._chunk_size_threshold
 
-    # 获取observation并发送
     def control_loop_observation(self, task: str, verbose: bool = False) -> RawObservation:
         try:
             # Get serialized observation bytes from the function
             start_time = time.perf_counter()
 
             raw_observation: RawObservation = self.robot.get_observation()
-            raw_observation["task"] = task
-            # 经过pipeline变成ee形式的state，从而发送给服务器做eestate->eeaction推理
-            # 这里？
-            # 如果只处理state怎么样？不处理image
-            keys_to_keep = [
-                'shoulder_pan.pos', 
-                'shoulder_lift.pos', 
-                'elbow_flex.pos', 
-                'wrist_flex.pos', 
-                'wrist_roll.pos', 
-                'gripper.pos'
+            ee_obs = self.joints_to_ee(raw_observation) 
+                    # 额外增加state_joint
+            joint_keys = [
+                "shoulder_pan.pos",
+                "shoulder_lift.pos",
+                "elbow_flex.pos",
+                "wrist_flex.pos",
+                "wrist_roll.pos",
+                "gripper.pos",
             ]
-            raw_observation_state= {k: raw_observation[k] for k in keys_to_keep}
-            motor_names = list(self.robot.bus.motors.keys()) 
-            obs_processed = compute_forward_kinematics_joints_to_ee(
-                joints=raw_observation_state,
-                kinematics=self.kinematics_solver,
-                motor_names=motor_names
-            )
-            # obs_processed = self.robot_joints_to_ee_pose_processor(raw_observation_state)
-            image_keys = ['wrist', 'side','task']
-            for k in image_keys:
-                obs_processed[k] = raw_observation[k]
-            # with open("obs_saved.pkl", "wb") as f:
-            #     pickle.dump(obs_processed, f)
-            # with open('obs_saved.pkl', 'rb') as f:
-            #     obs_processed = pickle.load(f)
-            # # 1. 先加载之前计算好的单应性矩阵 H
+
+            # 将 obs 中的关节角数据注入 obs_processed
+            for key in joint_keys:
+                if key in raw_observation:  # 确保obs中有这个值
+                    ee_obs[key] = raw_observation[key]
+            # raw_observation["task"] = task
+            ee_obs["task"] = task
+                        # 1. 先加载之前计算好的单应性矩阵 H
             # H = np.load("homography.npy")  # shape (3,3)
 
-            # # 2. 假设你在循环里获取obs后，直接对camera1的图像做变换
-            # if "side" in raw_observation:
-            #     img = raw_observation["side"]  # 这里 img 是 numpy array 格式
+            # 2. 假设你在循环里获取obs后，直接对camera1的图像做变换
+            # if "side" in ee_obs:
+            #     img = ee_obs["side"]  # 这里 img 是 numpy array 格式
             #     h, w = img.shape[:2]
             #     # 将新位置图像映射到旧位置视角
             #     warped_img = cv2.warpPerspective(img, H, (w, h))
-            #     raw_observation["side"] = warped_img  # 覆盖原来的图像
+            #     ee_obs["side"] = warped_img  # 覆盖原来的图像
 
             with self.latest_action_lock:
                 latest_action = self.latest_action
 
             observation = TimedObservation(
                 timestamp=time.time(),  # need time.time() to compare timestamps across client and server
-                observation=obs_processed,
+                observation=ee_obs,
                 timestep=max(latest_action, 0),
             )
 
@@ -774,7 +555,7 @@ class RobotClientEE:
                 # must-go event will be set again after receiving actions
                 self.must_go.clear()
 
-            if verbose:
+            if verbose :
                 # Calculate comprehensive FPS metrics
                 fps_metrics = self.fps_tracker.calculate_fps_metrics(observation.get_timestamp())
 
@@ -788,7 +569,7 @@ class RobotClientEE:
                     f"Ts={observation.get_timestamp():.6f} | Capturing observation took {obs_capture_time:.6f}s"
                 )
 
-            return obs_processed
+            return ee_obs
 
         except Exception as e:
             self.logger.error(f"Error in observation sender: {e}")
@@ -807,19 +588,19 @@ class RobotClientEE:
             """Control loop: (1) Performing actions, when available"""
             if self.actions_available():
                 _performed_action = self.control_loop_action(verbose)
-            # print("执行完control_loop_action",self.robot.get_only_state_obs()["shoulder_pan.pos"])
 
             """Control loop: (2) Streaming observations to the remote policy server"""
+            # if not self.sent_observation_once:
+                # 只执行头一次
             if self._ready_to_send_observation():
                 _captured_observation = self.control_loop_observation(task, verbose)
+                # self.sent_observation_once = True
 
-            self.logger.debug(f"Control loop (ms): {(time.perf_counter() - control_loop_start) * 1000:.2f}")
-            # print("执行完logger",self.robot.get_only_state_obs()["shoulder_pan.pos"])
+            # self.logger.debug(f"Control loop (ms): {(time.perf_counter() - control_loop_start) * 1000:.2f}")
             # Dynamically adjust sleep time to maintain the desired control frequency
-            time.sleep(max(0, self.config.environment_dt - (time.perf_counter() - control_loop_start)))
-            print("等了", 0.03 - (time.perf_counter() - control_loop_start),self.robot.get_only_state_obs())
-            # time.sleep(0.03)
-            # print("执行完sleep0.03之后的state",self.robot.get_only_state_obs()["shoulder_pan.pos"])
+            # time.sleep(max(0, self.config.environment_dt+0.03 - (time.perf_counter() - control_loop_start)))
+            # time.sleep(max(0,self.config.environment_dt ))
+            time.sleep(max(0,0.3-(time.perf_counter() - control_loop_start)))
 
         return _captured_observation, _performed_action
 
@@ -846,41 +627,13 @@ def async_client(cfg: RobotClientConfig):
             # The main thread runs the control loop
             client.control_loop(task=cfg.task)
 
-
-
         finally:
-            action_receiver_thread.join(timeout=2.0)
             client.stop()
-            # action_receiver_thread.join()
-            # print(client.logged_actions)
-            plot_actions(client)
+            action_receiver_thread.join()
             if cfg.debug_visualize_queue_size:
                 visualize_action_queue_size(client.action_queue_size)
             client.logger.info("Client stopped")
-        
 
-
-import matplotlib.pyplot as plt
-def plot_actions(client: RobotClientEE):
-    times = client.logged_timestamps
-    actions = client.logged_actions
-    joint_states = client.logged_joint_states
-
-    keys = list(actions[0].keys())  # action dict 的 key
-    n = len(keys)
-    fig, axes = plt.subplots(n, 1, figsize=(12, 3*n), sharex=True)
-
-    for i, key in enumerate(keys):
-        ax = axes[i]
-        y_action = [a[key] for a in actions]
-        y_joint = [s[key] for s in joint_states]  # joint_state 对应 key
-        ax.plot(times, y_action, label='performed_action')
-        ax.plot(times, y_joint, label='joint_state', linestyle='--')
-        ax.set_ylabel(key)
-        ax.legend()
-
-    plt.xlabel('Time (cishu)')
-    plt.show(block=True) 
 
 if __name__ == "__main__":
     async_client()  # run the client

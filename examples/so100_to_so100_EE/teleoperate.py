@@ -37,11 +37,19 @@ from lerobot.utils.visualization_utils import init_rerun, log_rerun_data
 
 FPS = 30
 
-# Initialize the robot and teleoperator config
+# 机器人配置
 follower_config = SO100FollowerConfig(
-    port="/dev/tty.usbmodem5A460814411", id="my_awesome_follower_arm", use_degrees=True
+    port="/dev/ttyACM0",  # 对应 YAML 的 follower port
+    id="foree_follower",           # YAML 中 follower id
+    use_degrees=True
 )
-leader_config = SO100LeaderConfig(port="/dev/tty.usbmodem5A460819811", id="my_awesome_leader_arm")
+
+# 遥操作臂配置
+leader_config = SO100LeaderConfig(
+    port="/dev/ttyACM1",  # 对应 YAML 的 teleop port
+    id="foree_leader"             # YAML 中 teleop id
+)
+
 
 # Initialize the robot and teleoperator
 follower = SO100Follower(follower_config)
@@ -49,14 +57,14 @@ leader = SO100Leader(leader_config)
 
 # NOTE: It is highly recommended to use the urdf in the SO-ARM100 repo: https://github.com/TheRobotStudio/SO-ARM100/blob/main/Simulation/SO101/so101_new_calib.urdf
 follower_kinematics_solver = RobotKinematics(
-    urdf_path="./SO101/so101_new_calib.urdf",
+    urdf_path="SO-ARM100/Simulation/SO101/so101_new_calib.urdf",
     target_frame_name="gripper_frame_link",
     joint_names=list(follower.bus.motors.keys()),
 )
 
 # NOTE: It is highly recommended to use the urdf in the SO-ARM100 repo: https://github.com/TheRobotStudio/SO-ARM100/blob/main/Simulation/SO101/so101_new_calib.urdf
 leader_kinematics_solver = RobotKinematics(
-    urdf_path="./SO101/so101_new_calib.urdf",
+    urdf_path="SO-ARM100/Simulation/SO101/so101_new_calib.urdf",
     target_frame_name="gripper_frame_link",
     joint_names=list(leader.bus.motors.keys()),
 )

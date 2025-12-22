@@ -107,6 +107,7 @@ class RobotClient:
             lerobot_features,
             config.actions_per_chunk,
             config.policy_device,
+            rename_map=config.rename_map
         )
         self.channel = grpc.insecure_channel(
             self.server_address, grpc_channel_options(initial_backoff=f"{config.environment_dt:.4f}s")
@@ -140,6 +141,11 @@ class RobotClient:
         threading.Thread(target=self._listen_clear_key,daemon=True).start()
         # 等待时间
         self.pause_until=0
+        # 为了记录state和action增加的
+        self.logged_timestamps = []
+        self.logged_actions = []  # list of dicts
+        self.logged_joint_states = []  # list of dicts
+
 
 
     def _listen_clear_key(self):
@@ -395,6 +401,7 @@ class RobotClient:
             # Get action from queue
             timed_action = self.action_queue.get_nowait()
         get_end = time.perf_counter() - get_start
+        joint_state=self.robot.get_only_state_obs()
 
         _performed_action = self.robot.send_action(
             self._action_tensor_to_action_dict(timed_action.get_action())
@@ -415,6 +422,10 @@ class RobotClient:
             self.logger.debug(
                 f"Popping action from queue to perform took {get_end:.6f}s | Queue size: {current_queue_size}"
             )
+        timestamp = time.time()
+        self.logged_timestamps.append(timestamp)
+        self.logged_actions.append(_performed_action)  # joint_action 是 dict
+        self.logged_joint_states.append(joint_state)
 
         return _performed_action
 
@@ -430,16 +441,16 @@ class RobotClient:
 
             raw_observation: RawObservation = self.robot.get_observation()
             raw_observation["task"] = task
-            # 1. 先加载之前计算好的单应性矩阵 H
-            H = np.load("homography.npy")  # shape (3,3)
+            # # 1. 先加载之前计算好的单应性矩阵 H
+            # H = np.load("homography.npy")  # shape (3,3)
 
-            # 2. 假设你在循环里获取obs后，直接对camera1的图像做变换
-            if "side" in raw_observation:
-                img = raw_observation["side"]  # 这里 img 是 numpy array 格式
-                h, w = img.shape[:2]
-                # 将新位置图像映射到旧位置视角
-                warped_img = cv2.warpPerspective(img, H, (w, h))
-                raw_observation["side"] = warped_img  # 覆盖原来的图像
+            # # 2. 假设你在循环里获取obs后，直接对camera1的图像做变换
+            # if "side" in raw_observation:
+            #     img = raw_observation["side"]  # 这里 img 是 numpy array 格式
+            #     h, w = img.shape[:2]
+            #     # 将新位置图像映射到旧位置视角
+            #     warped_img = cv2.warpPerspective(img, H, (w, h))
+            #     raw_observation["side"] = warped_img  # 覆盖原来的图像
 
             with self.latest_action_lock:
                 latest_action = self.latest_action
@@ -534,10 +545,32 @@ def async_client(cfg: RobotClientConfig):
         finally:
             client.stop()
             action_receiver_thread.join()
+            plot_actions(client)
             if cfg.debug_visualize_queue_size:
                 visualize_action_queue_size(client.action_queue_size)
             client.logger.info("Client stopped")
 
+import matplotlib.pyplot as plt
+def plot_actions(client: RobotClient):
+    times = client.logged_timestamps
+    actions = client.logged_actions
+    joint_states = client.logged_joint_states
+
+    keys = list(actions[0].keys())  # action dict 的 key
+    n = len(keys)
+    fig, axes = plt.subplots(n, 1, figsize=(12, 3*n), sharex=True)
+
+    for i, key in enumerate(keys):
+        ax = axes[i]
+        y_action = [a[key] for a in actions]
+        y_joint = [s[key] for s in joint_states]  # joint_state 对应 key
+        ax.plot(times, y_action, label='performed_action')
+        ax.plot(times, y_joint, label='joint_state', linestyle='--')
+        ax.set_ylabel(key)
+        ax.legend()
+
+    plt.xlabel('Time (s)')
+    plt.show()
 
 if __name__ == "__main__":
     async_client()  # run the client
