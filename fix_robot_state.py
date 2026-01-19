@@ -28,14 +28,15 @@ joint_names = [
     "gripper.pos"
 ]
 
+
 # --- 固定目标关节值 ---
 target_action = {
-    "shoulder_pan.pos": -10.066,
-    "shoulder_lift.pos": -91.433,
-    "elbow_flex.pos": 100.533,
-    "wrist_flex.pos": 38.086,
-    "wrist_roll.pos": -7.041,
-    "gripper.pos": 4.487
+    "shoulder_pan.pos": -10.065934065934066,
+    "shoulder_lift.pos": -90.85714285714286,
+    "elbow_flex.pos": 94.50549450549451,
+    "wrist_flex.pos": 49.18681318681319,
+    "wrist_roll.pos": -4.0,
+    "gripper.pos": 14.10756040530008
 }
 
 # --- 循环发送直到到位 ---

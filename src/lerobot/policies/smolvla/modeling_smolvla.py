@@ -288,9 +288,9 @@ class SmolVLAPolicy(PreTrainedPolicy):
         actions = actions[:, :, :original_action_dim]
         if self.config.adapt_to_pi_aloha:
             actions = self._pi_aloha_encode_actions(actions)
-        # torch.save(actions, "fixed_actions.pt")
+        # torch.save(actions, "fixed_actions_1217.pt")
         # print("输出的action",actions)
-        # actions = torch.load("fixed_actions_fuwuqi.pt",map_location=torch.device('cpu'))
+        # actions = torch.load("fixed_actions_1217.pt",map_location=torch.device('cpu'))
         return actions
 
     def _prepare_batch(self, batch: dict[str, Tensor]) -> dict[str, Tensor]:

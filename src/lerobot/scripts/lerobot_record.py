@@ -393,7 +393,7 @@ def record_loop(
         # Action can eventually be clipped using `max_relative_target`,
         # so action actually sent is saved in the dataset. action = postprocessor.process(action)
         # TODO(steven, pepijn, adil): we should use a pipeline step to clip the action, so the sent action is the action that we input to the robot.
-        print(f"ee-action是{act_processed_policy},观察的obs：shoulder_pan.pos={obs['shoulder_pan.pos']},shoulder_lift.pos={obs['shoulder_lift.pos']},elbow_flex.pos={obs['elbow_flex.pos']},wrist_flex.pos={obs['wrist_flex.pos']},wrist_roll.pos={obs['wrist_roll.pos']},gripper={obs['gripper.pos']},当前的joint_action{robot_action_to_send}")
+        # print(f"ee-action是{act_processed_policy},观察的obs：shoulder_pan.pos={obs['shoulder_pan.pos']},shoulder_lift.pos={obs['shoulder_lift.pos']},elbow_flex.pos={obs['elbow_flex.pos']},wrist_flex.pos={obs['wrist_flex.pos']},wrist_roll.pos={obs['wrist_roll.pos']},gripper={obs['gripper.pos']},当前的joint_action{robot_action_to_send}")
         _sent_action = robot.send_action(robot_action_to_send)
         
         # 新增 state_joint

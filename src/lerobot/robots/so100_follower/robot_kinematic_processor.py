@@ -278,7 +278,7 @@ class InverseKinematicsEEToJoints(RobotActionProcessorStep):
         wy = action.pop("ee.wy")
         wz = action.pop("ee.wz")
         gripper_pos = action.pop("ee.gripper_pos")
-
+5
         if None in (x, y, z, wx, wy, wz, gripper_pos):
             raise ValueError(
                 "Missing required end-effector pose components: ee.x, ee.y, ee.z, ee.wx, ee.wy, ee.wz, ee.gripper_pos must all be present in action"
