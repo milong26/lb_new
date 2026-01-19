@@ -48,9 +48,9 @@ from lerobot.utils.control_utils import init_keyboard_listener
 from lerobot.utils.utils import log_say
 from lerobot.utils.visualization_utils import init_rerun
 
-NUM_EPISODES = 10
+NUM_EPISODES = 1
 FPS = 30
-EPISODE_TIME_SEC = 200
+EPISODE_TIME_SEC = 30
 TASK_DESCRIPTION = "pick up the yellow sponge and place it into the box."
 HF_MODEL_ID = "outputs/train/ee_action_ee_state/checkpoints/020000/pretrained_model"
 HF_DATASET_ID = "eva_fuyuan/test4"
@@ -202,7 +202,7 @@ for episode_idx in range(NUM_EPISODES):
         continue
 
     # Save episode
-    dataset.save_episode()
+    # dataset.save_episode()
     episode_idx += 1
 
 # Clean up

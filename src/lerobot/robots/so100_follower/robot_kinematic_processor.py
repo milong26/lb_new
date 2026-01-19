@@ -295,7 +295,7 @@ class InverseKinematicsEEToJoints(RobotActionProcessorStep):
         if q_raw is None:
             raise ValueError("Joints observation is require for computing robot kinematics")
 
-        if self.initial_guess_current_joints:  # Use current joints as initial guess
+        if self.initial_guess_current_joints:  # Use current joints as initial guess True
             self.q_curr = q_raw
         else:  # Use previous ik solution as initial guess
             if self.q_curr is None:

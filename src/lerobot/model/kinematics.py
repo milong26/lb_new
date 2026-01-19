@@ -43,8 +43,13 @@ class RobotKinematics:
         self.robot = placo.RobotWrapper(urdf_path)
         self.solver = placo.KinematicsSolver(self.robot)
         self.solver.mask_fbase(True)  # Fix the base
-        # L2正则化
-        # self.reg_task = self.solver.add_regularization_task(1e-5)
+        # 增加
+        # 方案1，velocity limit 好像没什么变化
+        # self.solver.enable_velocity_limits(True)
+        # self.solver.dt = 0.01
+        # 方案2 正则化 效果也没相差太多阿
+        # self.solver.add_regularization_task(1e-4)  # L2
+        # 方案3 scaled
 
         self.target_frame_name = target_frame_name
 
@@ -83,7 +88,11 @@ class RobotKinematics:
         current_joint_pos: np.ndarray,
         desired_ee_pose: np.ndarray,
         position_weight: float = 1.0,
+        # 默认代码用0.01
+        # 如果使用1.0的话会导致很严重的问题！
+        # 好像问题也差不太多
         orientation_weight: float = 0.01,
+        # orientation_weight: float = 0.1,
     ) -> np.ndarray:
         """
         Compute inverse kinematics using placo solver.
@@ -112,6 +121,8 @@ class RobotKinematics:
         # 按照这个教程effector_task.configure("effector", "soft", 1.0, 1.0)为什么不放在init里面
         # soft意味着任务不是硬约束的（求解器将尽最大努力达到所需的姿势，但如果无法达到，则不会失败）
         # 为什么orientation_weight变成默认0.01了？
+        # self.tip_frame.configure(self.target_frame_name, "soft", position_weight, orientation_weight)
+        # 修改方案3，scaled
         self.tip_frame.configure(self.target_frame_name, "soft", position_weight, orientation_weight)
 
         # Solve IK
